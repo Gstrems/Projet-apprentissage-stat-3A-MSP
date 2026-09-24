@@ -7,21 +7,28 @@ library(tidyverse)
 tab = read.csv("ESCAP.csv", sep = ';')
 summary(tab) 
 nrow(tab)
+tab$pm17B <- as.numeric(gsub(",", ".", as.character(tab$pm17B)))
+sum(tab$pm17B) #  = nrow
+
 
 #############################################################
 
 #DISCRETISATION  DE Y
-# discrètisation de la variable cible + jamais bu pour les non réponses
-tab$Q19A=as.factor(tab$Q19A)
-tab$Q19A = fct_na_value_to_level(tab$Q19A)
-levels(tab$Q19A) =  c("10-" , "10-" , "10-" , "10-" , "10-" , "10-" , "10-" , "10-" , "10-" , "10-"  ,"10", "11" ,"12",
-                      "13" ,"14" ,"15", "16", "17" ,"18+" ,"18+", "18+" ,"18+", "18+", "18+", "NC")
+q <- quantile(tab$Q19A, probs = c(0.20, 0.40, 0.60, 0.80), na.rm = TRUE)
+q
+
+tab$Q19A <- cut(tab$Q19A, breaks = c(-Inf, q, Inf), labels = c("13-", "14", "15", "16", "17+"),
+  include.lowest = TRUE)
+
+tab$Q19A <- as.character(tab$Q19A)
+tab$Q19A[is.na(tab$Q19A)] <- "NC"
 table(tab$Q19A)
+
+#############################################################
+
 
 # 20 individus  qui sont en situation scolaire + pro
 nrow(tab[which(!is.na(tab$Q04A) & !is.na(tab$Q04B) ),])
-
-#############################################################
 
 #COMBINAISON  DE VARIABLE
 # Combinaison des variables  situation  scolaire/pro (en favorisant le scolaire 
@@ -51,19 +58,34 @@ nrow(tab[rowSums(is.na(tab[, c("B08A", "B08B")])) == 2, ])
 # 774 ne renseignent rien quant à la consommation d'alcool des parents -> on les élimine
 # insatisfaits (plus de 500 NA restantes par variable) par l'élimination de seulement 
 # ceux-ci, on étend l'élimination
+
+df_NA = tab[rowSums(is.na(tab[, c("Q10A1", "Q10B1","B08A", "B08B")])) >= 2, ]
+df_NA$pm17B = as.numeric(gsub(",", ".", as.character(df_NA$pm17B)))
+sum(df_NA$pm17B) #1796.04 pour 1794 individus
+
 df = tab[rowSums(is.na(tab[, c("Q10A1", "Q10B1","B08A", "B08B")])) < 2, ]
+df$pm17B <- as.numeric(gsub(",", ".", as.character(df$pm17B)))
 #Permet de réduire à  moins de 500 NA par variable parmi les 4 variables problématiques
 nrow(df) #perte de 1794 individus
 
-nrow(tab[rowSums(is.na(tab)) > 2, ]) #reste 593 individus avec plus de 2 Non-réponses
+nrow(df[rowSums(is.na(tab)) > 2, ]) #reste 593 individus avec plus de 2 Non-réponses
+
+plot(df_NA$pm17B)
+plot(df$pm17B)
+summary(df_NA$pm17B)
+summary(df$pm17B)
+# graphiquement et par étude des quantiles, on voit que les poids des individus perdus sont bien répartis
+#Au niveau des poids, on ne perd pas trop d'information en les enlevant
+#on perd juste le seul poids à 3
 
 #############################################################
 
 #REPONDERATION
-df$pm17B <- as.numeric(gsub(",", ".", as.character(df$pm17B)))
-df$pm17B <- df$pm17B / sum(df$pm17B)
+df$pm17B <- df$pm17B * nrow(df) / sum(df$pm17B, na.rm = TRUE)
 sum(df$pm17B)  #super
+nrow(df)
 
+summary(df)
 #############################################################
 
 #IMPUTATION (je n'ai pas appris à faire ça donc c'est pas mal de l'IA)

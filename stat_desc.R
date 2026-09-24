@@ -2,7 +2,7 @@
 # on fait ici quelques statistiques descriptives pour se donner une première 
 # idée du lien entre notre variable d'intérêt et les autres  
 ################################################################################
-#faire tourner avant tout traitement_NR.R
+#avant cette étape : charger la table ESCAP et gérer la non réponse 
 library(ggplot2)
 # test d'indépendance du Chi2 
 

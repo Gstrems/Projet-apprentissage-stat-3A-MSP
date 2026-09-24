@@ -125,33 +125,76 @@ indiv_nr_Q08 <- indiv_nr_Q08$A01
 any(is.na(escap$Q08C))#TRUE
 indiv_nr_Q08C <- escap |> filter(is.na(Q08C)) |> select(A01)
 indiv_nr_Q08C <- indiv_nr_Q08C$A01
+#individus qui ont pas connus leur parent pour X raison => réduire NR des réponses sur parents
+indiv_sans_parents <- escap |> filter(Q08C %in% c(3,4)) |> 
+  select(A01)
+indiv_sans_parents <- indiv_sans_parents$A01 #538 
+indiv_sans_pere <- escap |> filter(Q09A1 == 7) |> 
+  select(A01)
+indiv_sans_pere <- indiv_sans_pere$A01 #554 individus sans père
+indiv_sans_mere <- escap |> filter(Q09B1 == 7) |> 
+  select(A01)
+indiv_sans_mere <- indiv_sans_mere$A01 #157 individus sans mere
 
 
 #Q09A1
 any(is.na(escap$Q09A1))#TRUE
 indiv_nr_Q09A1 <- escap |> filter(is.na(Q09A1)) |> select(A01)
 indiv_nr_Q09A1 <- indiv_nr_Q09A1$A01 #402 non répondants 
+#indiv qui ne savent pas : 
+indiv_nsp_pere <- escap |> filter(Q09A1 == 6) |> select(A01)
+indiv_nsp_pere <- indiv_nsp_pere$A01
 
 #Q09B1
 any(is.na(escap$Q09B1))#TRUE
 indiv_nr_Q09B1 <- escap |> filter(is.na(Q09B1)) |> select(A01)
 indiv_nr_Q09B1 <- indiv_nr_Q09B1$A01 
+#indiv qui ne savent pas : 
+indiv_nsp_mere <- escap |> filter(Q09B1 == 6) |> select(A01)
+indiv_nsp_mere <- indiv_nsp_mere$A01
+
+#Q10A1 
+escap <- escap |> mutate(Q10A1 = ifelse(A01 %in% indiv_sans_pere, 9, Q10A1))
+escap <- escap |> mutate(Q10A1 = ifelse(A01 %in% indiv_sans_parents, 9, Q10A1))
+#nouvelle modalité : ne sait pas 
+escap <- escap |> mutate(Q10A1 = ifelse(A01 %in% indiv_nsp_pere, 0, Q10A1))
+indiv_nr_Q10A1 <- escap |> filter(is.na(Q10A1)) |> select(A01)
+indiv_nr_Q10A1 <- indiv_nr_Q10A1$A01
+
+#Q10B1
+escap <- escap |> mutate(Q10B1 = ifelse(A01 %in% indiv_sans_mere, 9, Q10B1))
+escap <- escap |> mutate(Q10B1 = ifelse(A01 %in% indiv_sans_parents, 9, Q10B1))
+#nouvelle modalité : ne sait pas 
+escap <- escap |> mutate(Q10B1 = ifelse(A01 %in% indiv_nsp_mere, 0, Q10B1))
+indiv_nr_Q10B1 <- escap |> filter(is.na(Q10B1)) |> select(A01)
+indiv_nr_Q10B1 <- indiv_nr_Q10B1$A01
 
 #B08A
 any(is.na(escap$B08A))#TRUE
 indiv_nr_B08A <- escap |> filter(is.na(B08A)) |> select(A01)
 indiv_nr_B08A<- indiv_nr_B08A$A01 #1400 non répondants
+#ajout d'une nouvelle modalité : 0 = non concerné
+escap <- escap |> mutate(B08A = ifelse(A01 %in% indiv_sans_pere, 0, B08A))
+indiv_nr_B08A <- escap |> filter(is.na(B08A)) |> select(A01)
+indiv_nr_B08A<- indiv_nr_B08A$A01
+escap <- escap <- escap |> mutate(B08A = ifelse(A01 %in% indiv_sans_parents, 0, B08A))
+indiv_nr_B08A <- escap |> filter(is.na(B08A)) |> select(A01)
+indiv_nr_B08A<- indiv_nr_B08A$A01 
 
 #B08B
 any(is.na(escap$B08B))#TRUE
 indiv_nr_B08B <- escap |> filter(is.na(B08B)) |> select(A01)
 indiv_nr_B08B<- indiv_nr_B08B$A01 #1050 non répondants
+#on ajoute une modalité: 0 = non concerné
+escap <- escap |> mutate(B08B = ifelse(A01 %in% indiv_sans_mere, 0, B08B))
+indiv_nr_B08B <- escap |> filter(is.na(B08B)) |> select(A01)
+indiv_nr_B08B<- indiv_nr_B08B$A01
+escap <- escap <- escap |> mutate(B08B = ifelse(A01 %in% indiv_sans_parents, 0, B08B))
+indiv_nr_B08B <- escap |> filter(is.na(B08B)) |> select(A01)
+indiv_nr_B08B<- indiv_nr_B08B$A01 
 
 
 
-
-
-x
 #### #### #### #### #### #### #### #### #### #### #### #### #### #### #### #### 
 #### Construction d'une table de non réponse : 
 # 1 = réponse pour la variable concernée
@@ -171,7 +214,7 @@ table_NR <- data.frame( id = escap$A01,
                         Q10A1 = ifelse(!(is.na(escap$Q10A1)), 1, 0),
                         Q10B1 = ifelse(!(is.na(escap$Q10B1)), 1, 0),
                         B08A = ifelse(!(is.na(escap$B08A)), 1, 0),
-                        B08B = ifelse(!(is.na(escap$B08B)), 1, 0),
+                        B08B = ifelse(!(is.na(escap$B08B)), 1, 0)
                         )
 table_NR$nb_nr <-15 -rowSums(table_NR[,-1])
 table_NR$pds <- escap$pm17B
@@ -180,8 +223,6 @@ table_NR |>
   group_by(nb_nr) |> 
   summarise(nb_individus = n())
 #variables les plus touchées par la non réponse
-
-
 nr_var <- 13314 - colSums(table_NR |> select(-c("id", "pds", "nb_nr"))) 
 nr_var
 

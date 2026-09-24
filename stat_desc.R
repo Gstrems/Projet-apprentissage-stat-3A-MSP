@@ -25,8 +25,129 @@ chisq.test(Y, escap$B08B) #X-squared = 312.45, df = 92, p-value < 2.2e-16
 
 #Barplot
 escap$Y <- Y
-barplot(escap[], 
+
+
+#Q03 : sexe
+tab <- table(escap[[2]], escap[[18]]) 
+barplot(tab, 
         legend = TRUE,
         col = c("steelblue", "firebrick"),
         main = "Répartition de var2 selon var1",
-        xlab = "var1", ylab = "Effectif")
+        xlab = "Y", ylab = "Q03")
+
+#Q04 : Situation
+tab <- table(escap[[3]], escap[[18]]) 
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q04A : Situation scolaire
+tab <- table(escap[[4]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q04B : Situation pro
+tab <- table(escap[[5]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "green"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q05 : redoublement
+tab <- table(escap[[6]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q06A
+tab <- table(escap[[7]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q06B
+tab <- table(escap[[8]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q08
+tab <- table(escap[[9]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "black"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q08C
+tab <- table(escap[[10]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "black"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q09A1
+tab <- table(escap[[11]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "black", "green", "orange"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q09B1
+tab <- table(escap[[12]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "black", "green", "orange"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q10A1 
+tab <- table(escap[[13]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", 
+                "black", "green", "orange", "blue", "red",
+                "gray"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#Q10B1 
+tab <- table(escap[[14]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", 
+                "black", "green", "orange", "blue", "red", "gray"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#B08A 
+tab <- table(escap[[15]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "black", "green"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+#B08B
+tab <- table(escap[[16]], escap[[18]])
+barplot(tab, 
+        legend = TRUE,
+        col = c("steelblue", "firebrick", "yellow", "purple", "black", "green"),
+        main = "Répartition de var2 selon var1",
+        xlab = "Y", ylab = "Q03")
+
+

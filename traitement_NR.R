@@ -4,35 +4,30 @@
 ################################################################################
 #charger ESCAP depuis un fichier dédié et inscrit au .gitignore
 library(dplyr)
-
+library(FactoMineR)
+library(missMDA)
 # Etat de la non-réponse pour chaque variable et premiers ajustements
 ################################################################################
 summary(escap)
+summary(Y)
 #pm17B = poids de sondages
 any(is.na(escap$pm17B)) #FALSE : on a l'info sur toutes les variables
 plot(escap$pm17B) 
 summary(escap$pm17B)
 
 #la variable d'intérêt Q19A (âge au premier alcool)
-Y <- escap$Q19A
 any(is.na(Y))#TRUE
-indiv_na_Y <-which(is.na(Y))
+indiv_na_Y <-escap[which(is.na(Y)), 1]
 length(indiv_na_Y) #2393 non répondant
 
 
 #Q03 : sexe
-any(is.na(escap$Q03)) #TRUE
-which(is.na(escap$Q03)) #23 non répondants
 indiv_nr_Q03 <- escap[which(is.na(escap$Q03)),1]
-summary(pds_indiv_nr_Q03)
 
-
+#Q04
+indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
 
 #Q04 A et B: situation scolaire (A) et pro (B)
-any(is.na(escap$Q04A)) #TRUE
-any(is.na(escap$Q04B)) #TRUE
-length(which(is.na(escap$Q04A))) #593 non répondants
-length(which(is.na(escap$Q04B))) #12777 non répondants 
 # Hypothèse : la situation scolaire et professionnelles s'excluent : NA = non concerné
 # individus NR pour A et B
 indiv_nr_Q04AB <- escap |> 
@@ -71,8 +66,6 @@ indiv_nr_Q04AB <- indiv_nr_Q04AB$A01
 
 
 #Q04
-any(is.na(escap$Q04))#TRUE
-indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1] #1583
 # est-ce que le volume de NR peut être réduit avec info de Q04A et Q04B ?
 indiv_r_Q04AB <- escap |> filter(!(is.na(Q04A))&!(is.na(Q04B))) |> select(A01)
 indiv_r_Q04AB <- indiv_r_Q04AB$A01
@@ -122,7 +115,6 @@ indiv_nr_Q08 <- indiv_nr_Q08$A01
 
 
 #Q08C
-any(is.na(escap$Q08C))#TRUE
 indiv_nr_Q08C <- escap |> filter(is.na(Q08C)) |> select(A01)
 indiv_nr_Q08C <- indiv_nr_Q08C$A01
 #individus qui ont pas connus leur parent pour X raison => réduire NR des réponses sur parents
@@ -138,7 +130,6 @@ indiv_sans_mere <- indiv_sans_mere$A01 #157 individus sans mere
 
 
 #Q09A1
-any(is.na(escap$Q09A1))#TRUE
 indiv_nr_Q09A1 <- escap |> filter(is.na(Q09A1)) |> select(A01)
 indiv_nr_Q09A1 <- indiv_nr_Q09A1$A01 #402 non répondants 
 #indiv qui ne savent pas : 
@@ -146,7 +137,6 @@ indiv_nsp_pere <- escap |> filter(Q09A1 == 6) |> select(A01)
 indiv_nsp_pere <- indiv_nsp_pere$A01
 
 #Q09B1
-any(is.na(escap$Q09B1))#TRUE
 indiv_nr_Q09B1 <- escap |> filter(is.na(Q09B1)) |> select(A01)
 indiv_nr_Q09B1 <- indiv_nr_Q09B1$A01 
 #indiv qui ne savent pas : 
@@ -160,6 +150,9 @@ escap <- escap |> mutate(Q10A1 = ifelse(A01 %in% indiv_sans_parents, 9, Q10A1))
 escap <- escap |> mutate(Q10A1 = ifelse(A01 %in% indiv_nsp_pere, 0, Q10A1))
 indiv_nr_Q10A1 <- escap |> filter(is.na(Q10A1)) |> select(A01)
 indiv_nr_Q10A1 <- indiv_nr_Q10A1$A01
+escap$Q10A1 <- as.factor(escap$Q10A1 )
+
+
 
 #Q10B1
 escap <- escap |> mutate(Q10B1 = ifelse(A01 %in% indiv_sans_mere, 9, Q10B1))
@@ -168,6 +161,8 @@ escap <- escap |> mutate(Q10B1 = ifelse(A01 %in% indiv_sans_parents, 9, Q10B1))
 escap <- escap |> mutate(Q10B1 = ifelse(A01 %in% indiv_nsp_mere, 0, Q10B1))
 indiv_nr_Q10B1 <- escap |> filter(is.na(Q10B1)) |> select(A01)
 indiv_nr_Q10B1 <- indiv_nr_Q10B1$A01
+escap$Q10B1 <- as.factor(escap$Q10B1)
+
 
 #B08A
 any(is.na(escap$B08A))#TRUE
@@ -180,6 +175,8 @@ indiv_nr_B08A<- indiv_nr_B08A$A01
 escap <- escap <- escap |> mutate(B08A = ifelse(A01 %in% indiv_sans_parents, 0, B08A))
 indiv_nr_B08A <- escap |> filter(is.na(B08A)) |> select(A01)
 indiv_nr_B08A<- indiv_nr_B08A$A01 
+escap$B08A <- as.factor(escap$B08A)
+
 
 #B08B
 any(is.na(escap$B08B))#TRUE
@@ -192,7 +189,9 @@ indiv_nr_B08B<- indiv_nr_B08B$A01
 escap <- escap <- escap |> mutate(B08B = ifelse(A01 %in% indiv_sans_parents, 0, B08B))
 indiv_nr_B08B <- escap |> filter(is.na(B08B)) |> select(A01)
 indiv_nr_B08B<- indiv_nr_B08B$A01 
+escap$B08B <- as.factor(escap$B08B)
 
+summary(escap)
 
 
 #### #### #### #### #### #### #### #### #### #### #### #### #### #### #### #### 
@@ -226,4 +225,54 @@ table_NR |>
 nr_var <- 13314 - colSums(table_NR |> select(-c("id", "pds", "nb_nr"))) 
 nr_var
 
+
+################################################################################
+# Suppression de certains individus qui accumulent trop de non réponse pour 
+# être convenablement traités
+################################################################################
+# je ne le fais pas pour voir comment on s'en sort avec uniquement imputation
+################################################################################
+# Gestion des NA dans les prédicteurs : imputation avec le package missMDA
+# (plus simple et moins gourmand)
+# limite de l'approche : on prend pas en compte la relation à Y pour imputer
+################################################################################
+df_MCA <- escap |> select(-c(pm17B,A01))
+df_MCA <- df_MCA |> mutate(across(everything(), as.factor))
+rownames(df_MCA) <- escap$A01
+
+
+res <- MCA(escap)
+#très long: 
+#nb_comp <- estim_ncpMCA(df_MCA, ncp.max = 5, method.cv = "Kfold", nbsim = 20)
+nb_comp <- 4
+X_complete <- imputeMCA(df_MCA, nb_comp)
+X_complete <- X_complete$completeObs
+################################################################################
+# DISCRETISATION  DE Y
+################################################################################
+escap$Y <- as.numeric(Y)
+
+q <- quantile(escap$Y, probs = c(0.20, 0.40, 0.60, 0.80), na.rm = TRUE)
+q
+
+escap$Y <- cut(escap$Y, breaks = c(-Inf, q, Inf), labels = c("13-", "14", "15", "16", "17+"),
+                include.lowest = TRUE)
+
+escap$Y <- as.factor(escap$Y)
+################################################################################
+# Gestion des NA dans Y: on procède par repondération
+################################################################################
+# 
+Y_rep <- ifelse(is.na(escap$Y), 0, 1)
+as.factor(Y_rep)
+#on écarte Q04B car il y a beaucoup de corrélations avec Q04A
+X_complete$Y_rep <- Y_rep
+X_complete <- X_complete |> select(-Q04B)
+mod <- glm(Y_rep ~ ., data = X_complete, family = binomial(link = "logit"))
+summary(mod)
+#probabilités prédites pour chaque individu
+escap$repond <- predict(mod, type = "response", newdata = X_complete)
+escap$pds_rep <- escap$pm17B/escap$repond
+
+escap_final <- escap |> filter(!is.na(Y)) |> select(-c(pm17B, repond, Y_rep))
 

@@ -1,0 +1,1430 @@
+---
+title: "Copie quarto final"
+format: html
+---
+
+---
+title: "Projet Apprentissage Statistique -groupe  Gabriel Stremsdoerfer et Denis"
+format: pdf
+editor: visual
+---
+
+------------------------------------------------------------------------
+
+# Traitement des données
+
+## Importation des données et librairies
+
+```{r}
+
+library(mice)
+library(tidyverse)
+```
+
+```{r}
+
+```
+
+```{library(dplyr)}
+library(FactoMineR)
+library(missMDA)
+library(ranger)
+library(tidyr)
+library(caret)
+library(ggplot2)
+library(readr)
+library(purrr)
+library(plotROC)
+library(xgboost)
+library(yardstick)
+library(forcats)
+library(SHAPforxgboost)
+library(questionr)
+library(nnet)
+
+```
+
+```{r}
+setwd(getwd())
+escap = read.csv("ESCAP.csv", sep = ';')
+```
+
+`{summary(escap)}`
+
+## Discrétisation de Y
+
+Comme convenu en cours, on considère que les non-répondants ne sont pas concernés par la question : on doit donc discrétiser la variable. De plus, on remarque une concentration très importante autour des ages 14,15 et 16. Pour maintenir des effectifs équilibrés sans perdre trop d'information, on utilise les quintiles et on discrétise la variable.
+
+```{r}
+
+escap$Y <- escap$Q19A
+escap = escap[,-15]
+
+plot(density(escap$Y, na.rm = TRUE))
+
+q <- quantile(
+  escap$Y,
+  probs = c(0.20, 0.40, 0.60, 0.80),
+  na.rm = TRUE
+)
+
+escap$Y <- cut(
+  escap$Y,
+  breaks = c(-Inf, q, Inf),
+  labels = c("13-", "14", "15", "16", "17+"),
+  include.lowest = TRUE
+)
+
+escap$Y <- as.factor(escap$Y)
+
+escap$Y <- as.character(escap$Y)
+escap$Y[is.na(escap$Y)] <- "NC"
+
+table(escap$Y)
+
+```
+
+## Traitement des données manquantes
+
+Dans la table de données ESCAP, toutes les variables sont concernées par la non réponse, aussi bien dans notre variable d'intérêt (âge de la première consommation d'alcool) que dans les prédicteurs.
+
+```{r}
+#### Construction d'une table de non réponse : 
+# 1 = réponse pour la variable concernée
+# 0 = NR
+table_NR <- data.frame( id = escap$A01,
+                        Q03 = ifelse(!(is.na(escap$Q03)), 1, 0),
+                        Q04 = ifelse(!(is.na(escap$Q04)), 1, 0),
+                        Q04A = ifelse(!(is.na(escap$Q04A)), 1, 0),
+                        Q04B = ifelse(!(is.na(escap$Q04B)), 1, 0),
+                        Q05 =  ifelse(!(is.na(escap$Q05)), 1, 0),
+                        Q06A = ifelse(!(is.na(escap$Q06A)), 1, 0),
+                        Q06B = ifelse(!(is.na(escap$Q06B)), 1, 0),
+                        Q08 = ifelse(!(is.na(escap$Q08)), 1, 0),
+                        Q08C = ifelse(!(is.na(escap$Q08C)), 1, 0),
+                        Q09A1 = ifelse(!(is.na(escap$Q09A1)), 1, 0),
+                        Q09B1 = ifelse(!(is.na(escap$Q09B1)), 1, 0),
+                        Q10A1 = ifelse(!(is.na(escap$Q10A1)), 1, 0),
+                        Q10B1 = ifelse(!(is.na(escap$Q10B1)), 1, 0),
+                        B08A = ifelse(!(is.na(escap$B08A)), 1, 0),
+                        B08B = ifelse(!(is.na(escap$B08B)), 1, 0)
+)
+table_NR$nb_nr <-15 -rowSums(table_NR[,-1])
+table_NR$pds <- escap$pm17B
+#variables les plus touchées par la non réponse
+nr_var <- 13314 - colSums(table_NR |> select(-c("id", "pds", "nb_nr"))) 
+nr_var
+
+```
+
+Cependant, il faut distinguer la non réponse et le fait de ne pas être concerné par la question. Là où l'on pouvait s'en assurer, nous avons donc ajouté des modalités "0" pour désigner le fait de ne pas être concerné.
+
+Ici, on s'est intéressé aux variables Q04, Q04A et Q04B. C'est à dire les variables traitant de la situation scolaire et/ou professionnelle. En supposant que situation professionnelle et scolaires s'excluent la plupart du temps, on a déduit une non-réponse conditionnelle dans les cas où une seule des deux variable était sans réponse. C'est à dire que dans la grande majorité des cas, un répondant qui travaille ne fait pas d'étude et inversement.
+
+```{r}
+#Q04
+indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
+
+#Q04 A et B: situation scolaire (A) et pro (B)
+# Hypothèse : la situation scolaire et professionnelle s'excluent : NA = non concerné
+# individus NR pour A et B
+indiv_nr_Q04AB <- escap |> 
+  filter(is.na(Q04A) & is.na(Q04B)) |> 
+  select(A01)
+cat("Le nombre d'individus non répondants à Q04A et Q04B est de", length(indiv_nr_Q04AB$A01), "\n")
+#Q0A : individus répondants et non répondants exceptés individus NR pour A et B
+indiv_nr_Q04A <- escap |> 
+  filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
+  filter(is.na(Q04A)) |> 
+  dplyr::select(A01)
+
+indiv_r_Q04A <- escap |> 
+  filter(!(is.na(Q04A))) |> 
+  dplyr::select(A01)
+
+#Q0B : individus répondants et non répondants exceptés individus NR pour A et B
+indiv_nr_Q04B <- escap |> 
+  filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
+  filter(is.na(Q04B)) |> 
+  dplyr::select(A01)
+
+indiv_r_Q04B <- escap |> 
+  filter(!(is.na(Q04B))) |> 
+  dplyr::select(A01)
+
+#individus hors intersection entre répondre à Q04B et ne pas répondre à Q04A
+diff_r_Q0B_nr_Q0A <- setdiff(
+  indiv_nr_Q04A,
+  indiv_r_Q04B
+) #0 : dans les faits, répondre à Q04B => ne pas répondre à Q04A
+
+#individus hors intersection entre répondre à Q04A et ne pas répondre à Q04B
+diff_r_Q0A_nr_Q0B <- setdiff(
+  indiv_nr_Q04B,
+  indiv_r_Q04A
+) #0 : : dans les faits, répondre à Q04A => ne pas répondre à Q04B
+```
+
+On converti alors les NA des non concernés en une modalité "0"
+
+```{r}
+#On impute une nouvelle modalité : 0 = "Non concerné" pour Q04A et Q04B
+
+#Q04A
+escap <- escap |> 
+  mutate(
+    Q04A = ifelse(
+      A01 %in% indiv_nr_Q04A$A01,
+      0,
+      Q04A
+    )
+  )
+
+#Q04B
+escap <- escap |> 
+  mutate(
+    Q04B = ifelse(
+      A01 %in% indiv_nr_Q04B$A01,
+      0,
+      Q04B
+    )
+  )
+
+indiv_nr_Q04AB <- indiv_nr_Q04AB$A01
+```
+
+Pour Q04 on tient le raisonnement inverse : Si une réponse de Q04A ou de Q04B est spécifiée (à part 0), on peut déduire dans ce cas la "vraie" réponse.
+
+```{r}
+#Q04
+# est-ce que le volume de NR peut être réduit avec info de Q04A et Q04B ?
+indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
+indiv_r_Q04AB <- escap |> 
+  filter(!(is.na(Q04A)) & !(is.na(Q04B))) |> 
+  select(A01)
+
+indiv_r_Q04AB <- indiv_r_Q04AB$A01
+
+length(setdiff(indiv_nr_Q04, indiv_r_Q04AB))
+
+# 19 indiv NR de Q04 ne sont pas parmi les indiv qui ont répondu à Q04A ou Q04B
+
+# on impute la réponse en fonction des réponses cochées dans Q04A et Q04B
+escap <- escap |>
+  mutate(
+    Q04 = ifelse(is.na(Q04A), NA, 1)
+  ) |> 
+  mutate(
+    Q04 = ifelse(
+      !(Q04B %in% c(0,NA)),
+      2,
+      Q04
+    )
+  )
+
+#ici on a une hypothèse : travailler (ou rechercher un emploi) <=> arrêter ses études
+#Comme on a vu que les non réponses dans Q04A et Q04B étaient vraisemblablement des 
+#réponses de non concerné, cette hypothèse est crédible.
+```
+
+Concernant les questions touchant aux parents : Q08C (vie des parents), Q09A1 (situation du père), Q09B1 (situation de la mère), Q10A1 (PCS du père), Q10B1 (PCS de la mère), B08A (consommation d'alcool du père) et B08A (consommation d'alcool de la mère), on arrive à réduire le nombre de non répondant en repérant parmis ces derniers ceux n'ayant pas connu l'un ou l'autre de leurs parents.
+
+```{r}
+#Q08
+any(is.na(escap$Q08))#TRUE
+
+indiv_nr_Q08 <- escap |> 
+  filter(is.na(Q08)) |> 
+  select(A01)
+
+indiv_nr_Q08 <- indiv_nr_Q08$A01
+
+
+#Q08C
+indiv_nr_Q08C <- escap |> 
+  filter(is.na(Q08C)) |> 
+  select(A01)
+
+indiv_nr_Q08C <- indiv_nr_Q08C$A01
+
+#individus qui ont pas connus leur parent pour X raison => réduire NR des réponses sur parents
+
+indiv_sans_parents <- escap |> 
+  filter(Q08C %in% c(3,4)) |> 
+  select(A01)
+
+indiv_sans_parents <- indiv_sans_parents$A01 #538 
+
+indiv_sans_pere <- escap |> 
+  filter(Q09A1 == 7) |> 
+  select(A01)
+
+indiv_sans_pere <- indiv_sans_pere$A01 #554 individus sans père
+
+indiv_sans_mere <- escap |> 
+  filter(Q09B1 == 7) |> 
+  select(A01)
+
+indiv_sans_mere <- indiv_sans_mere$A01 #157 individus sans mere
+
+
+#Q09A1
+indiv_nr_Q09A1 <- escap |> 
+  filter(is.na(Q09A1)) |> 
+  select(A01)
+
+indiv_nr_Q09A1 <- indiv_nr_Q09A1$A01 #402 non répondants 
+
+#indiv qui ne savent pas : 
+indiv_nsp_pere <- escap |> 
+  filter(Q09A1 == 6) |> 
+  select(A01)
+
+indiv_nsp_pere <- indiv_nsp_pere$A01
+
+
+#Q09B1
+indiv_nr_Q09B1 <- escap |> 
+  filter(is.na(Q09B1)) |> 
+  select(A01)
+
+indiv_nr_Q09B1 <- indiv_nr_Q09B1$A01 
+
+#indiv qui ne savent pas : 
+indiv_nsp_mere <- escap |> 
+  filter(Q09B1 == 6) |> 
+  select(A01)
+
+indiv_nsp_mere <- indiv_nsp_mere$A01
+
+
+#Q10A1 
+escap <- escap |> 
+  mutate(
+    Q10A1 = ifelse(
+      A01 %in% indiv_sans_pere,
+      9,
+      Q10A1
+    )
+  )
+
+escap <- escap |> 
+  mutate(
+    Q10A1 = ifelse(
+      A01 %in% indiv_sans_parents,
+      9,
+      Q10A1
+    )
+  )
+
+#nouvelle modalité : ne sait pas 
+escap <- escap |> 
+  mutate(
+    Q10A1 = ifelse(
+      A01 %in% indiv_nsp_pere,
+      0,
+      Q10A1
+    )
+  )
+
+indiv_nr_Q10A1 <- escap |> 
+  filter(is.na(Q10A1)) |> 
+  select(A01)
+
+indiv_nr_Q10A1 <- indiv_nr_Q10A1$A01
+
+escap$Q10A1 <- as.factor(escap$Q10A1)
+
+
+
+#Q10B1
+escap <- escap |> 
+  mutate(
+    Q10B1 = ifelse(
+      A01 %in% indiv_sans_mere,
+      9,
+      Q10B1
+    )
+  )
+
+escap <- escap |> 
+  mutate(
+    Q10B1 = ifelse(
+      A01 %in% indiv_sans_parents,
+      9,
+      Q10B1
+    )
+  )
+
+#nouvelle modalité : ne sait pas 
+escap <- escap |> 
+  mutate(
+    Q10B1 = ifelse(
+      A01 %in% indiv_nsp_mere,
+      0,
+      Q10B1
+    )
+  )
+
+indiv_nr_Q10B1 <- escap |> 
+  filter(is.na(Q10B1)) |> 
+  select(A01)
+
+indiv_nr_Q10B1 <- indiv_nr_Q10B1$A01
+
+escap$Q10B1 <- as.factor(escap$Q10B1)
+
+
+#B08A
+#ajout d'une nouvelle modalité : 0 = non concerné
+escap <- escap |> 
+  mutate(
+    B08A = ifelse(
+      A01 %in% indiv_sans_pere,
+      0,
+      B08A
+    )
+  )
+
+indiv_nr_B08A <- escap |> 
+  filter(is.na(B08A)) |> 
+  select(A01)
+
+indiv_nr_B08A <- indiv_nr_B08A$A01
+
+escap <- escap |> 
+  mutate(
+    B08A = ifelse(
+      A01 %in% indiv_sans_parents,
+      0,
+      B08A
+    )
+  )
+
+indiv_nr_B08A <- escap |> 
+  filter(is.na(B08A)) |> 
+  select(A01)
+
+indiv_nr_B08A <- indiv_nr_B08A$A01 
+
+escap$B08A <- as.factor(escap$B08A)
+
+
+#B08B
+#ajout d'une nouvelle modalité: 0 = non concerné
+escap <- escap |> 
+  mutate(
+    B08B = ifelse(
+      A01 %in% indiv_sans_mere,
+      0,
+      B08B
+    )
+  )
+
+indiv_nr_B08B <- escap |> 
+  filter(is.na(B08B)) |> 
+  select(A01)
+
+indiv_nr_B08B <- indiv_nr_B08B$A01
+
+escap <- escap |> 
+  mutate(
+    B08B = ifelse(
+      A01 %in% indiv_sans_parents,
+      0,
+      B08B
+    )
+  )
+```
+
+Ces quelques manipulations nous ont permis de réduire le niveau de nombre de non-réponses dans les prédicteurs adéquats.
+
+```{r}
+escap <- escap |> 
+  mutate(across(2:17, as.factor))
+summary(escap)
+```
+
+## Suppression des individus avec trop de Non-réponse
+
+```{#on supprimme pas d'individu : c'est de l'information}
+```
+
+## Création d'un jeu de donnée imputé
+
+Concernant les individus non répondants restants dans les prédicteurs, on procède par imputation multiple via le package mice
+
+```{r}
+
+################################################################################
+# création d'un dataset imputé 
+################################################################################
+
+# Variables à imputer
+vars_imp <- names(escap)[c(2:16)]
+
+# Mise en facteur
+escap[c(2:16)] <- lapply(
+  escap[c(2:16)],
+  factor
+)
+
+# Initialisation de mice
+ini <- mice(
+  escap,
+  maxit = 0,
+  printFlag = FALSE
+)
+
+# Méthodes d'imputation
+meth <- ini$method
+meth[] <- ""
+
+for (v in vars_imp) {
+
+  nlev <- nlevels(escap[[v]])
+
+  if (nlev == 2) {
+    meth[v] <- "logreg"
+  } else if (nlev > 2) {
+    meth[v] <- "polyreg"
+  }
+}
+
+# Matrice des prédicteurs
+pred <- ini$predictorMatrix
+
+# A01 et pm17B ne servent jamais de prédicteurs
+pred[, "A01"] <- 0
+pred[, "pm17B"] <- 0
+
+# Les variables à imputer peuvent se prédire entre elles
+pred[vars_imp, vars_imp] <- 1
+diag(pred) <- 0
+
+# Imputation
+imp <- mice(
+  escap,
+  m = 1,
+  maxit = 20,
+  method = meth,
+  predictorMatrix = pred,
+  seed = 12345,
+  printFlag = TRUE
+)
+
+# Création du dataset imputé
+df_imp <- complete(
+  imp,
+  1
+)
+
+# Vérification
+anyNA(df_imp)
+
+summary(df_imp)
+
+# Sauvegarde
+write.csv2(
+  df_imp,
+  file = "Imputé final.csv",
+  row.names = FALSE
+)
+
+```
+
+Statistique descriptive
+
+```{r}
+
+```
+
+# Stacking de XGboost et RF
+
+## Préparation des données
+
+```{r}
+
+df <- read.csv2(
+  "Imputé final.csv",
+  sep = ";",
+  stringsAsFactors = FALSE
+)
+
+df[, c(2:16,18)] <- lapply(
+  df[, c(2:16,18)],
+  factor
+)
+
+# Mise en forme des données
+data_rf <- df[, c(18, 2:17)]
+names(data_rf)[1] <- "Y"
+
+data_rf$Y <- factor(
+  data_rf$Y
+)
+
+# Poids
+data_rf$pm17B <- as.numeric(
+  as.character(data_rf$pm17B)
+)
+
+```
+
+## Séparation apprentissage / test
+
+On utilise un seul découpage apprentissage/test pour les trois modèles afin que leurs performances soient comparables.
+
+```{r}
+
+set.seed(42)
+
+train_index <- createDataPartition(
+  data_rf$Y,
+  p = 0.70,
+  list = FALSE
+)
+
+train_data <- data_rf[
+  train_index,
+  ,
+  drop = FALSE
+]
+
+test_data <- data_rf[
+  -train_index,
+  ,
+  drop = FALSE
+]
+
+classes <- levels(train_data$Y)
+K <- length(classes)
+
+# 5 folds communs à RF et XGBoost
+set.seed(42)
+
+folds <- createFolds(
+  train_data$Y,
+  k = 5,
+  list = TRUE,
+  returnTrain = FALSE
+)
+
+```
+
+# Paramètres de RF
+
+```{r}
+
+################################################################################
+# TUNING RANDOM FOREST PAR VALIDATION CROISEE
+################################################################################
+
+# Variables explicatives
+rf_features <- setdiff(
+  names(train_data),
+  c("Y", "pm17B")
+)
+
+# Hyperparamètres testés
+rf_grid <- expand.grid(
+  mtry = 1:7,
+  num.trees = seq(50, 500, by = 50),
+  min.node.size = c(1, 5, 10)
+)
+
+# Par VC, on teste le nb d'arbres, mtry et la taille de noeud minimale des arbres de la RF
+# Attention c'est un peu lourd à compiler
+
+rf_results <- rf_grid %>%
+  mutate(
+    cv_error = pmap_dbl(
+      list(
+        mtry,
+        num.trees,
+        min.node.size
+      ),
+      function(m, ntree, node) {
+
+        fold_errors <- map_dbl(
+          folds,
+          function(valid_index) {
+
+            train_fold <- train_data[
+              -valid_index,
+              ,
+              drop = FALSE
+            ]
+
+            valid_fold <- train_data[
+              valid_index,
+              ,
+              drop = FALSE
+            ]
+
+            model <- ranger(
+              Y ~ . - pm17B,
+              data = train_fold,
+              mtry = m,
+              num.trees = ntree,
+              min.node.size = node,
+              importance = "permutation",
+              classification = TRUE,
+              probability = FALSE,
+              case.weights = train_fold$pm17B
+            )
+
+            pred <- predict(
+              model,
+              data = valid_fold[
+                ,
+                rf_features,
+                drop = FALSE
+              ]
+            )$predictions
+
+            mean(
+              pred != valid_fold$Y
+            )
+          }
+        )
+
+        mean(fold_errors)
+      }
+    )
+  )
+
+# Meilleur modèle
+best_rf <- rf_results %>%
+  slice_min(
+    cv_error,
+    n = 1,
+    with_ties = FALSE
+  )
+
+rf_mtry <- best_rf$mtry
+rf_ntree <- best_rf$num.trees
+rf_node <- best_rf$min.node.size
+
+cat(
+  "Meilleur modèle : mtry =",
+  rf_mtry,
+  ", ntree =",
+  rf_ntree,
+  ", min.node.size =",
+  rf_node,
+  ", erreur CV =",
+  round(best_rf$cv_error, 4),
+  "\n"
+)
+
+```
+
+```{r}
+
+# Visualisation de l'erreur CV
+ggplot(
+  rf_results %>%
+    filter(
+      min.node.size == rf_node
+    ),
+  aes(
+    x = num.trees,
+    y = cv_error,
+    color = as.factor(mtry)
+  )
+) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  labs(
+    title = "Erreur de validation croisée selon le nombre d'arbres et mtry",
+    x = "Nombre d'arbres (num.trees)",
+    y = "Erreur CV",
+    color = "mtry"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+
+rf_mtry #2 
+rf_ntree #100
+rf_node  #10
+```
+
+Voici donc les paramètres optimaux pour notre Random Forest.
+
+## Paramètres de XGBoost
+
+```{r}
+
+################################################################################
+# TUNING XGBOOST PAR VALIDATION CROISEE
+################################################################################
+
+# Transformation des variables qualitatives en variables numériques
+x_train <- model.matrix(
+  Y ~ . - pm17B - 1,
+  data = train_data
+)
+
+x_test <- model.matrix(
+  Y ~ . - pm17B - 1,
+  data = test_data
+)
+
+# Même ordre de colonnes pour train et test
+x_test <- x_test[
+  ,
+  colnames(x_train),
+  drop = FALSE
+]
+
+# Classes numériques 0, ..., K-1
+y_train <- as.numeric(
+  train_data$Y
+) - 1
+
+y_test <- as.numeric(
+  factor(
+    test_data$Y,
+    levels = classes
+  )
+) - 1
+
+# Poids
+w_train <- train_data$pm17B
+w_test <- test_data$pm17B
+
+################################################################################
+# HYPERPARAMETRES TESTES
+################################################################################
+
+xgb_grid <- expand.grid(
+  max_depth = c(2, 3, 4, 5, 6),
+  nrounds = c(50, 100, 150, 200, 300),
+  eta = c(0.01, 0.05, 0.10, 0.20)
+)
+
+################################################################################
+# VALIDATION CROISEE
+################################################################################
+
+xgb_results <- xgb_grid %>%
+  mutate(
+    cv_error = pmap_dbl(
+      list(
+        max_depth,
+        nrounds,
+        eta
+      ),
+      function(depth, rounds, learning_rate) {
+
+        fold_errors <- map_dbl(
+          folds,
+          function(valid_index) {
+
+            train_index_fold <- setdiff(
+              seq_len(nrow(train_data)),
+              valid_index
+            )
+
+            dtrain <- xgb.DMatrix(
+              x_train[
+                train_index_fold,
+                ,
+                drop = FALSE
+              ],
+              label = y_train[
+                train_index_fold
+              ],
+              weight = w_train[
+                train_index_fold
+              ]
+            )
+
+            dvalid <- xgb.DMatrix(
+              x_train[
+                valid_index,
+                ,
+                drop = FALSE
+              ],
+              label = y_train[
+                valid_index
+              ]
+            )
+
+            model <- xgb.train(
+              params = list(
+                objective = "multi:softprob",
+                num_class = K,
+                max_depth = depth,
+                eta = learning_rate,
+                eval_metric = "merror"
+              ),
+              data = dtrain,
+              nrounds = rounds,
+              verbose = 0
+            )
+
+            # Probabilités prédites
+            pred_prob <- predict(
+              model,
+              dvalid
+            )
+
+            pred_prob <- matrix(
+              pred_prob,
+              ncol = K,
+              byrow = TRUE
+            )
+
+            # Classe prédite
+            pred_class <- max.col(
+              pred_prob
+            ) - 1
+
+            # Erreur de classification
+            mean(
+              pred_class != y_train[
+                valid_index
+              ]
+            )
+          }
+        )
+
+        mean(fold_errors)
+      }
+    )
+  )
+
+################################################################################
+# MEILLEURS PARAMETRES
+################################################################################
+
+best_xgb <- xgb_results %>%
+  slice_min(
+    cv_error,
+    n = 1,
+    with_ties = FALSE
+  )
+
+xgb_max_depth <- best_xgb$max_depth
+xgb_nrounds <- best_xgb$nrounds
+xgb_eta <- best_xgb$eta
+
+cat(
+  "Meilleur modèle XGBoost : max_depth =",
+  xgb_max_depth,
+  ", nrounds =",
+  xgb_nrounds,
+  ", eta =",
+  xgb_eta,
+  ", erreur CV =",
+  round(best_xgb$cv_error, 4),
+  "\n"
+)
+
+```
+
+```{r}
+
+# Affichage des 10 meilleures combinaisons
+xgb_results %>%
+  arrange(cv_error) %>%
+  head(10)
+
+```
+
+```{r}
+
+# Visualisation de l'erreur CV
+ggplot(
+  xgb_results,
+  aes(
+    x = nrounds,
+    y = cv_error,
+    color = factor(max_depth),
+    group = max_depth
+  )
+) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  facet_wrap(~ eta) +
+  labs(
+    title = "Erreur de validation croisée - XGBoost",
+    x = "Nombre d'itérations (nrounds)",
+    y = "Erreur moyenne CV",
+    color = "max_depth"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+xgb_max_depth
+xgb_nrounds
+xgb_eta
+
+```
+
+Avec les paramètres de RF et XGBoost, on peut passer au stacking.
+
+# Stacking
+
+## Préparation des folds
+
+```{r}
+
+n_folds <- length(folds)
+
+# Noms internes du stacking
+rf_names <- paste0(
+  "RF_C",
+  seq_len(K)
+)
+
+xgb_names <- paste0(
+  "XGB_C",
+  seq_len(K)
+)
+
+oof_rf <- matrix(
+  NA_real_,
+  nrow = nrow(train_data),
+  ncol = K,
+  dimnames = list(
+    NULL,
+    rf_names
+  )
+)
+
+oof_xgb <- matrix(
+  NA_real_,
+  nrow = nrow(train_data),
+  ncol = K,
+  dimnames = list(
+    NULL,
+    xgb_names
+  )
+)
+
+```
+
+On passe aux folds.
+
+```{r}
+
+# Predictions out of fold pour rf et xg
+
+for (i in seq_along(folds)) {
+
+  valid <- folds[[i]]
+
+  train <- setdiff(
+    seq_len(nrow(train_data)),
+    valid
+  )
+
+  train_fold <- train_data[
+    train,
+    ,
+    drop = FALSE
+  ]
+
+  valid_fold <- train_data[
+    valid,
+    ,
+    drop = FALSE
+  ]
+
+  # ---------------- RF ----------------
+
+  rf <- ranger(
+    Y ~ . - pm17B,
+    data = train_fold,
+    num.trees = rf_ntree,
+    mtry = rf_mtry,
+    min.node.size = rf_node,
+    probability = TRUE,
+    case.weights = train_fold$pm17B,
+    seed = 123 + i
+  )
+
+  oof_rf[
+    valid,
+  ] <- predict(
+    rf,
+    valid_fold[
+      ,
+      rf_features,
+      drop = FALSE
+    ]
+  )$predictions[
+    ,
+    classes,
+    drop = FALSE
+  ]
+
+
+  # ---------------- XGBoost ----------------
+
+  dtrain <- xgb.DMatrix(
+    x_train[
+      train,
+      ,
+      drop = FALSE
+    ],
+    label = y_train[
+      train
+    ],
+    weight = w_train[
+      train
+    ]
+  )
+
+  dvalid <- xgb.DMatrix(
+    x_train[
+      valid,
+      ,
+      drop = FALSE
+    ],
+    label = y_train[
+      valid
+    ]
+  )
+
+  xgb <- xgb.train(
+    params = list(
+      objective = "multi:softprob",
+      num_class = K,
+      max_depth = xgb_max_depth,
+      eta = xgb_eta,
+      eval_metric = "mlogloss"
+    ),
+    data = dtrain,
+    nrounds = xgb_nrounds,
+    verbose = 0
+  )
+
+  oof_xgb[
+    valid,
+  ] <- matrix(
+    predict(
+      xgb,
+      dvalid
+    ),
+    ncol = K,
+    byrow = TRUE
+  )
+}
+
+```
+
+## Méta-modèle multinomial
+
+```{r}
+
+meta_data <- data.frame(
+  oof_rf,
+  oof_xgb,
+  Y = train_data$Y,
+  check.names = FALSE
+)
+
+meta_model <- multinom(
+  Y ~ .,
+  data = meta_data,
+  trace = FALSE
+)
+
+```
+
+## RF et XGBoost finaux
+
+```{r}
+
+###################################################
+# RF et XGBOOST finaux
+
+# ---------------- RF ----------------
+
+final_rf <- ranger(
+  Y ~ . - pm17B,
+  data = train_data,
+  num.trees = rf_ntree,
+  mtry = rf_mtry,
+  min.node.size = rf_node,
+  probability = TRUE,
+  case.weights = w_train,
+  importance = "permutation",
+  seed = 999
+)
+
+pred_rf_test <- predict(
+  final_rf,
+  test_data[
+    ,
+    rf_features,
+    drop = FALSE
+  ]
+)$predictions[
+  ,
+  classes,
+  drop = FALSE
+]
+
+
+# ---------------- XGBoost ----------------
+
+dtrain <- xgb.DMatrix(
+  x_train,
+  label = y_train,
+  weight = w_train
+)
+
+dtest <- xgb.DMatrix(
+  x_test,
+  label = y_test,
+  weight = w_test
+)
+
+final_xgb <- xgb.train(
+  params = list(
+    objective = "multi:softprob",
+    num_class = K,
+    max_depth = xgb_max_depth,
+    eta = xgb_eta,
+    eval_metric = "mlogloss"
+  ),
+  data = dtrain,
+  nrounds = xgb_nrounds,
+  verbose = 0
+)
+
+pred_xgb_test <- matrix(
+  predict(
+    final_xgb,
+    dtest
+  ),
+  ncol = K,
+  byrow = TRUE
+)
+
+colnames(pred_xgb_test) <- classes
+
+```
+
+## Prédictions du stacking
+
+```{r}
+
+colnames(pred_rf_test) <- rf_names
+colnames(pred_xgb_test) <- xgb_names
+
+meta_test <- data.frame(
+  pred_rf_test,
+  pred_xgb_test,
+  check.names = FALSE
+)
+
+# Vérification importante
+stopifnot(
+  identical(
+    names(meta_data)[
+      names(meta_data) != "Y"
+    ],
+    names(meta_test)
+  )
+)
+
+stacked_probs <- predict(
+  meta_model,
+  meta_test,
+  type = "probs"
+)
+
+if (is.null(dim(stacked_probs))) {
+
+  stacked_probs <- matrix(
+    stacked_probs,
+    ncol = K
+  )
+}
+
+colnames(stacked_probs) <- classes
+
+```
+
+# Premiers résultats
+
+## Classes prédites
+
+```{r}
+
+rf_pred <- factor(
+  classes[
+    max.col(pred_rf_test)
+  ],
+  levels = classes
+)
+
+xgb_pred <- factor(
+  classes[
+    max.col(pred_xgb_test)
+  ],
+  levels = classes
+)
+
+stack_pred <- factor(
+  classes[
+    max.col(stacked_probs)
+  ],
+  levels = classes
+)
+
+```
+
+## Matrices de confusion
+
+```{r}
+
+cm_rf <- confusionMatrix(
+  rf_pred,
+  test_data$Y,
+  mode = "everything"
+)
+
+cm_xgb <- confusionMatrix(
+  xgb_pred,
+  test_data$Y,
+  mode = "everything"
+)
+
+cm_stack <- confusionMatrix(
+  stack_pred,
+  test_data$Y,
+  mode = "everything"
+)
+
+```
+
+## Comparaison des accuracies
+
+```{r}
+
+accuracy_results <- data.frame(
+  Modele = c(
+    "Random Forest",
+    "XGBoost",
+    "Stacking"
+  ),
+  Accuracy = c(
+    cm_rf$overall["Accuracy"],
+    cm_xgb$overall["Accuracy"],
+    cm_stack$overall["Accuracy"]
+  )
+)
+
+print(accuracy_results)
+
+```
+
+## Matrices de confusion pondérées
+
+```{r}
+
+weighted_confusion <- function(
+  pred,
+  truth,
+  weights
+) {
+
+  xtabs(
+    weights ~ pred + truth,
+    data = data.frame(
+      pred = factor(
+        pred,
+        levels = classes
+      ),
+      truth = factor(
+        truth,
+        levels = classes
+      ),
+      weights = weights
+    )
+  )
+}
+
+weighted_cm_rf <- weighted_confusion(
+  rf_pred,
+  test_data$Y,
+  w_test
+)
+
+weighted_cm_xgb <- weighted_confusion(
+  xgb_pred,
+  test_data$Y,
+  w_test
+)
+
+weighted_cm_stack <- weighted_confusion(
+  stack_pred,
+  test_data$Y,
+  w_test
+)
+
+```
+
+## Importance des variables
+
+```{r}
+
+# Importance RF
+rf_importance <- sort(
+  final_rf$variable.importance,
+  decreasing = TRUE
+)
+
+# Importance XGBoost
+xgb_importance <- xgb.importance(
+  model = final_xgb
+)
+
+```
+
+## Résultats finaux à comparer
+
+```{r}
+
+cat("\n--- RF ---\n")
+print(cm_rf)
+
+cat("\n--- XGBoost ---\n")
+print(cm_xgb)
+
+cat("\n--- Stacking ---\n")
+print(cm_stack)
+
+cat("\n--- Accuracy ---\n")
+print(accuracy_results)
+
+cat("\n--- Importance RF ---\n")
+print(rf_importance)
+
+cat("\n--- Importance XGBoost ---\n")
+print(xgb_importance)
+
+cat("\n--- Matrice pondérée RF ---\n")
+print(weighted_cm_rf)
+
+cat("\n--- Matrice pondérée XGBoost ---\n")
+print(weighted_cm_xgb)
+
+cat("\n--- Matrice pondérée Stacking ---\n")
+print(weighted_cm_stack)
+
+```

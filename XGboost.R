@@ -13,6 +13,7 @@ library(SHAPforxgboost)
 library(ggplot2)
 library(caret)
 library(questionr)
+
 #on récupère 
 df <- escap_final
 #model.matrix gère difficilement les NA dans les factors : on en fait une modalité à part

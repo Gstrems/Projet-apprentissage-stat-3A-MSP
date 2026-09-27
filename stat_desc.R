@@ -6,6 +6,9 @@
 library(ggplot2)
 # test d'indépendance du Chi2 
 
+escap = read.csv("ESCAP.csv", sep = ';')
+Y = escap$Q19A
+
 chisq.test(Y, escap$Q03) #X-squared = 199.12, df = 23, p-value < 2.2e-16
 chisq.test(Y, escap$Q04) #X-squared = 75.3, df = 23, p-value = 1.8e-07
 chisq.test(Y, escap$Q04A) #X-squared = 129.87, df = 69, p-value = 1.307e-05

@@ -1,25 +1,20 @@
-################################################################################
-# Dans ce fichier on traite la non réponse dans les données
-# Objectif : obtenir un jeu de données utilisable pour les modèles
-################################################################################
-#charger ESCAP depuis un fichier dédié et inscrit au .gitignore
+
+library(mice)
+library(tidyverse)
 library(dplyr)
 library(FactoMineR)
 library(missMDA)
+
+
+escap = read.csv("ESCAP.csv", sep = ';')
+
+
 # Etat de la non-réponse pour chaque variable et premiers ajustements
 ################################################################################
 summary(escap)
-summary(Y)
 #pm17B = poids de sondages
 any(is.na(escap$pm17B)) #FALSE : on a l'info sur toutes les variables
-plot(escap$pm17B) 
 summary(escap$pm17B)
-
-#la variable d'intérêt Q19A (âge au premier alcool)
-any(is.na(Y))#TRUE
-indiv_na_Y <-escap[which(is.na(Y)), 1]
-length(indiv_na_Y) #2393 non répondant
-
 
 #Q03 : sexe
 indiv_nr_Q03 <- escap[which(is.na(escap$Q03)),1]
@@ -28,26 +23,26 @@ indiv_nr_Q03 <- escap[which(is.na(escap$Q03)),1]
 indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
 
 #Q04 A et B: situation scolaire (A) et pro (B)
-# Hypothèse : la situation scolaire et professionnelles s'excluent : NA = non concerné
+# Hypothèse : la situation scolaire et professionnelle s'excluent : NA = non concerné
 # individus NR pour A et B
 indiv_nr_Q04AB <- escap |> 
   filter(is.na(Q04A) & is.na(Q04B)) |> select(A01)
-      #Q0A : individus répondants et non répondants exceptés individus NR pour A et B
-      indiv_nr_Q04A <- escap |> 
-        filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
-        filter(is.na(Q04A)) |> 
-        dplyr::select(A01)
-      indiv_r_Q04A <- escap |> 
-        filter(!(is.na(Q04A))) |> 
-        dplyr::select(A01)
-      #Q0B : individus répondants et non répondants exceptés individus NR pour A et B
-      indiv_nr_Q04B <- escap |> 
-        filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
-        filter(is.na(Q04B)) |> 
-        dplyr::select(A01)
-      indiv_r_Q04B <- escap |> 
-        filter(!(is.na(Q04B))) |> 
-        dplyr::select(A01)
+#Q0A : individus répondants et non répondants exceptés individus NR pour A et B
+indiv_nr_Q04A <- escap |> 
+  filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
+  filter(is.na(Q04A)) |> 
+  dplyr::select(A01)
+indiv_r_Q04A <- escap |> 
+  filter(!(is.na(Q04A))) |> 
+  dplyr::select(A01)
+#Q0B : individus répondants et non répondants exceptés individus NR pour A et B
+indiv_nr_Q04B <- escap |> 
+  filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
+  filter(is.na(Q04B)) |> 
+  dplyr::select(A01)
+indiv_r_Q04B <- escap |> 
+  filter(!(is.na(Q04B))) |> 
+  dplyr::select(A01)
 #individus hors intersection entre répondre à Q04B et ne pas répondre à Q04A
 diff_r_Q0B_nr_Q0A <-setdiff(indiv_nr_Q04A, indiv_r_Q04B) #0
 #individus hors intersection entre répondre à Q04A et ne pas répondre à Q04B
@@ -55,6 +50,9 @@ diff_r_Q0A_nr_Q0B <-setdiff(indiv_nr_Q04B, indiv_r_Q04A) #0
 #on en conclut que ormis les 76 : tous non concernés
 pds_indiv_nr_Q04AB <- escap |> filter(A01 %in% indiv_nr_Q04AB$A01) |> select(pm17B)
 pds_indiv_nr_Q04AB <- pds_indiv_nr_Q04AB$pm17B
+
+
+
 #On impute une nouvelle modalité : 0 = "Non concerné" pour Q04A et Q04B
 #Q04A
 escap <- escap |> 
@@ -214,7 +212,7 @@ table_NR <- data.frame( id = escap$A01,
                         Q10B1 = ifelse(!(is.na(escap$Q10B1)), 1, 0),
                         B08A = ifelse(!(is.na(escap$B08A)), 1, 0),
                         B08B = ifelse(!(is.na(escap$B08B)), 1, 0)
-                        )
+)
 table_NR$nb_nr <-15 -rowSums(table_NR[,-1])
 table_NR$pds <- escap$pm17B
 #nombre d'individu selon le nombre de non réponse
@@ -230,52 +228,138 @@ nr_var
 # Suppression de certains individus qui accumulent trop de non réponse pour 
 # être convenablement traités
 ################################################################################
-# je ne le fais pas pour voir comment on s'en sort avec uniquement imputation
-################################################################################
-# Gestion des NA dans les prédicteurs : imputation avec le package missMDA
-# (plus simple et moins gourmand)
-# limite de l'approche : on prend pas en compte la relation à Y pour imputer
-################################################################################
-df_MCA <- escap |> select(-c(pm17B,A01))
-df_MCA <- df_MCA |> mutate(across(everything(), as.factor))
-rownames(df_MCA) <- escap$A01
+
+escap$pm17B = as.numeric(gsub(",", ".", as.character(escap$pm17B)))
+
+#ELIMINATION D'INDIVIDUS
+#recherche  d'individu  avec  beaucoup  de  non  réponses parmi les variables où on a beaucoup de non réponses
+# Attention !! -> si on retire des individus, il faudra renormaliser les poids (colonne pm17B)
+# Notons que le caractère genré des questions sur les parents invisibilise les couples homosexuels
+# Beaucoup de NA pour les PCS des parents et leur consommation de boisson
+
+# 870 ne connaissent pas les PCS des parents -> on les élimine
+# 774 ne renseignent rien quant à la consommation d'alcool des parents -> on les élimine
+
+# insatisfaits (plus de 500 NA restantes par variable) par l'élimination de seulement 
+# ceux-ci, on étend l'élimination
+
+df_NA = escap[rowSums(is.na(escap[, c("Q10A1", "Q10B1","B08A", "B08B")])) >= 2, ]
+sum(df_NA$pm17B) #1560.715 pour 1794 individus donc on a une distribution correcte
 
 
-res <- MCA(escap)
-#très long: 
-#nb_comp <- estim_ncpMCA(df_MCA, ncp.max = 5, method.cv = "Kfold", nbsim = 20)
-nb_comp <- 4
-X_complete <- imputeMCA(df_MCA, nb_comp)
-X_complete <- X_complete$completeObs
+df_NA2 = escap[rowSums(is.na(escap)) >= 3, ]
+sum(df_NA2$pm17B) #123.1713 pour 121 individus donc on a une distribution correcte
+
+
+escap = escap[rowSums(is.na(escap[, c("Q10A1", "Q10B1","B08A", "B08B")])) < 2, ]
+escap = escap[rowSums(is.na(escap)) < 3, ]
+
+nrow(escap) #11636 individus restants
+
+
+
+#############################################################
+
+#REPONDERATION
+escap$pm17B <- escap$pm17B * nrow(escap) / sum(escap$pm17B, na.rm = TRUE)
+sum(escap$pm17B)  #super
+nrow(escap)
+
+summary(escap)
+
+
+
 ################################################################################
 # DISCRETISATION  DE Y
 ################################################################################
-escap$Y <- as.numeric(Y)
+escap$Y <- escap$Q19A
 
 q <- quantile(escap$Y, probs = c(0.20, 0.40, 0.60, 0.80), na.rm = TRUE)
 q
 
 escap$Y <- cut(escap$Y, breaks = c(-Inf, q, Inf), labels = c("13-", "14", "15", "16", "17+"),
-                include.lowest = TRUE)
+               include.lowest = TRUE)
 
 escap$Y <- as.factor(escap$Y)
+
+table(escap$Y)
+
+
+escap$Y <- as.character(escap$Y)
+escap$Y[is.na(escap$Y)] <- "NC"
+table(escap$Y)
+#  13-   14   15   16  17+   NC 
+# 2264 1924 2908 2053  551 1936 
+
+escap = escap[,-15]
+
+
+summary(escap)
+
+
 ################################################################################
-# Gestion des NA dans Y: on procède par repondération
+# création d'un dataset imputé 
 ################################################################################
-# 
-Y_rep <- ifelse(is.na(escap$Y), 0, 1)
-as.factor(Y_rep)
-#on écarte Q04B car il y a beaucoup de corrélations avec Q04A
-X_complete$Y_rep <- Y_rep
-X_complete <- X_complete |> select(-Q04B)
-mod <- glm(Y_rep ~ ., data = X_complete, family = binomial(link = "logit"))
-summary(mod)
-#probabilités prédites pour chaque individu
-escap$repond <- predict(mod, type = "response", newdata = X_complete)
-escap$pds_rep <- escap$pm17B/escap$repond
 
-escap_final <- escap |> filter(!is.na(Y)) |> select(-c(pm17B, repond, Y_rep))
-summary(escap_final)
+# Variables à imputer
+vars_imp <- names(escap)[c(2:16)]
+
+# Mise en facteur
+escap[c(2:16)] <- lapply(escap[c(2:16)], factor)
+
+# Initialisation de mice
+ini <- mice(escap, maxit = 0, printFlag = FALSE)
+
+# Méthodes d'imputation
+meth <- ini$method
+meth[] <- ""
+
+for (v in vars_imp) {
+  nlev <- nlevels(escap[[v]])
+  
+  if (nlev == 2) {
+    meth[v] <- "logreg"
+  } else if (nlev > 2) {
+    meth[v] <- "polyreg"
+  }
+}
+
+# Matrice des prédicteurs
+pred <- ini$predictorMatrix
+
+# A01 et pm17B ne servent jamais de prédicteurs
+pred[, "A01"] <- 0
+pred[, "pm17B"] <- 0
+
+# Les variables à imputer peuvent se prédire entre elles
+pred[vars_imp, vars_imp] <- 1
+diag(pred) <- 0
+
+# Imputation
+imp <- mice(
+  escap,
+  m = 1,
+  maxit = 20,
+  method = meth,
+  predictorMatrix = pred,
+  seed = 12345,
+  printFlag = TRUE
+)
+
+# Création du dataset imputé
+df_imp <- complete(imp, 1)
+
+# Vérification
+anyNA(df_imp)
+
+summary(df_imp)
+
+# Sauvegarde
 
 
-write.csv2(escap_final, file = "escap_final.csv", row.names = FALSE)
+write.csv2(
+  df_imp,
+  file = "Imputé final.csv",
+  row.names = FALSE
+)
+

@@ -3,6 +3,7 @@ library(mice)
 library(tidyverse)
 
 #############################################################
+escap = read.csv("ESCAP.csv", sep = ';')
 
 tab = read.csv("ESCAP.csv", sep = ';')
 summary(tab) 

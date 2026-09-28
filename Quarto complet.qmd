@@ -788,6 +788,8 @@ cat(
 
 ```
 
+Meilleur modèle : mtry = 2 , ntree = 200 , min.node.size = 10 , erreur CV = 0.6959
+
 ```{r}
 
 # Visualisation de l'erreur CV
@@ -818,7 +820,7 @@ ggplot(
 
 
 rf_mtry #2 
-rf_ntree #100
+rf_ntree #200
 rf_node  #10
 ```
 
@@ -997,6 +999,8 @@ cat(
 
 ```
 
+Meilleur modèle XGBoost : max_depth = 4 , nrounds = 300 , eta = 0.05 , erreur CV = 0.8301
+
 ```{r}
 
 # Affichage des 10 meilleures combinaisons
@@ -1033,9 +1037,9 @@ ggplot(
 
 ```{r}
 
-xgb_max_depth
-xgb_nrounds
-xgb_eta
+xgb_max_depth #4
+xgb_nrounds #300
+xgb_eta #0.05
 
 ```
 

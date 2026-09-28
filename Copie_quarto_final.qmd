@@ -1,6 +1,16 @@
 ---
-title: "Proj Gabriel-Denis"
-format: pdf
+title: "Projet Apprentissage Statistique - Gabriel Stremsdoerfer et Denis Jaouen"
+format:
+  pdf:
+    documentclass: article
+    geometry:
+      - top=20mm
+      - bottom=20mm
+      - left=20mm
+      - right=20mm
+    toc: true
+    number-sections: true
+    colorlinks: true
 editor: visual
 ---
 
@@ -30,7 +40,7 @@ library(forcats)
 library(SHAPforxgboost)
 library(questionr)
 library(nnet)
-
+library(purrr)
 ```
 
 ```{r}
@@ -63,14 +73,12 @@ escap$Y <- cut(
 
 escap$Y <- as.factor(escap$Y)
 
-escap$Y <- as.character(escap$Y)
-escap$Y[is.na(escap$Y)] <- "NC"
 
 table(escap$Y)
 
 ```
 
-Comme convenu en cours, on considère que les non-répondants ne sont pas concernés par la question : on doit donc discrétiser la variable. De plus, on remarque une concentration très importante autour des ages 14,15 et 16. Pour maintenir des effectifs équilibrés sans perdre trop d'information, on utilise les quintiles et on discrétise la variable.
+La distribution de Y a des queues de distribution très aplaties, ce qui peut poser problème en l'état en introduisant des classes rares. Pour maintenir des effectifs équilibrés sans perdre trop d'information, on choisit alors d'utiliser les quintiles pour discrétiser la variable. Les modalités finales de Y sont donc : 13- (2551 individus), 14 (2150 individus), 15 (3244 individus), 16 (2331 individus) et 17+ (645 individus)
 
 ```{r}
 
@@ -458,154 +466,159 @@ escap$B08B <- as.factor(escap$B08B)
 
 En observant les différentes modalités de certaines questions, on a à nouveau pu réduire les non-réponses dans des variables liées. Notamment, lorsqu'un répondant déclare sa mère comme décédée ou perdue de vue, il ne peut logiquement pas déclarer sa consommation d'alcool.
 
-## Suppression des individus avec trop de Non-réponse
+# Statistiques descriptives
+
+tests d'indépendance du Khi2
 
 ```{r}
-
-escap$pm17B = as.numeric(
-  gsub(",", ".", as.character(escap$pm17B))
+# 1. Liste des variables explicatives à tester face à Y
+vars <- c(
+  "Q03", "Q04", "Q04A", "Q04B", "Q05", 
+  "Q06A", "Q06B", "Q08", "Q08C", "Q09A1", 
+  "Q09B1", "Q10A1", "Q10B1", "B08A", "B08B"
 )
 
-#ELIMINATION D'INDIVIDUS
-#recherche  d'individu  avec  beaucoup  de  non  réponses parmi les variables où on a beaucoup de non réponses
-# Attention !! -> si on retire des individus, il faudra renormaliser les poids (colonne pm17B)
-# Notons que le caractère genré des questions sur les parents invisibilise les couples homosexuels
-# Beaucoup de NA pour les PCS des parents et leur consommation de boisson
+# 2. Exécution des tests du Chi2 et extraction des statistiques
+chi2_results <- map_dfr(vars, function(v) {
+  # Récupération du test du Chi2 (ignore silencieusement les avertissements d'effectifs faibles)
+  test <- suppressWarnings(chisq.test(escap$Y, escap[[v]]))
+  
+  tibble(
+    Variable    = v,
+    `Statistique (Chi2)` = round(unname(test$statistic), 2),
+    `Degrés de liberté`  = unname(test$parameter),
+    `p-value`            = test$p.value,
+    Significatif        = ifelse(test$p.value < 0.05, "Oui", "Non")
+  )
+})
 
-# ~800 ne connaissent pas les PCS des parents -> on les élimine
-# ~700 ne renseignent rien quant à la consommation d'alcool des parents -> on les élimine
+# 3. Formater la p-value pour un affichage propre (ex: "< 0.001")
+chi2_results <- chi2_results %>%
+  mutate(
+    `p-value` = ifelse(`p-value` < 0.001, "< 0.001", sprintf("%.4f", `p-value`))
+  )
 
-# insatisfaits (plus de 500 NA restantes par variable) par l'élimination de seulement 
-# ceux-ci, on étend l'élimination
-
-df_NA = escap[
-  rowSums(
-    is.na(
-      escap[, c("Q10A1", "Q10B1", "B08A", "B08B")]
-    )
-  ) >= 2,
-]
-
-df_NA2 = escap[
-  rowSums(is.na(escap)) >= 3,
-]
-
-cat(
-  "Poids cumulés des individus perdus :",
-  sum(df_NA$pm17B) + sum(df_NA2$pm17B)
-)
-
-cat(
-  "Nombre d'individus perdus :",
-  nrow(df_NA) + nrow(df_NA2)
-)
-
-escap = escap[
-  rowSums(
-    is.na(
-      escap[, c("Q10A1", "Q10B1", "B08A", "B08B")]
-    )
-  ) < 2,
-]
-
-escap = escap[
-  rowSums(is.na(escap)) < 3,
-]
-
-#############################################################
-
-#REPONDERATION
-
-escap$pm17B <- escap$pm17B *
-  nrow(escap) /
-  sum(escap$pm17B, na.rm = TRUE)
-
+# Affichage du tableau dans la sortie de la cellule
+chi2_results
 ```
 
-Le poids cumulé est proche du nombre d'individus perdus. Sachant que la moyenne des poids est à 1, on estime que les poids des individus perdus sont bien répartis. On répondère bien les poids après coup et on a donc un jeu de donnée qu'on peut imputer avec confiance.
-
-## Création d'un jeu de donnée imputé
+A priori, Y ne semble pas indépendantes de chacun des prédicteurs pris à un un.
 
 ```{r}
-
-################################################################################
-# création d'un dataset imputé 
-################################################################################
-
-# Variables à imputer
-vars_imp <- names(escap)[c(2:16)]
-
-# Mise en facteur
-escap[c(2:16)] <- lapply(
-  escap[c(2:16)],
-  factor
-)
-
-# Initialisation de mice
-ini <- mice(
-  escap,
-  maxit = 0,
-  printFlag = FALSE
-)
-
-# Méthodes d'imputation
-meth <- ini$method
-meth[] <- ""
-
-for (v in vars_imp) {
-
-  nlev <- nlevels(escap[[v]])
-
-  if (nlev == 2) {
-    meth[v] <- "logreg"
-  } else if (nlev > 2) {
-    meth[v] <- "polyreg"
-  }
-}
-
-# Matrice des prédicteurs
-pred <- ini$predictorMatrix
-
-# A01 et pm17B ne servent jamais de prédicteurs
-pred[, "A01"] <- 0
-pred[, "pm17B"] <- 0
-
-# Les variables à imputer peuvent se prédire entre elles
-pred[vars_imp, vars_imp] <- 1
-diag(pred) <- 0
-
-# Imputation
-imp <- mice(
-  escap,
-  m = 1,
-  maxit = 20,
-  method = meth,
-  predictorMatrix = pred,
-  seed = 12345,
-  printFlag = TRUE
-)
-
-# Création du dataset imputé
-df_imp <- complete(
-  imp,
-  1
-)
-
-# Vérification
-anyNA(df_imp)
-
-summary(df_imp)
-
-# Sauvegarde
-write.csv2(
-  df_imp,
-  file = "Imputé final.csv",
-  row.names = FALSE
-)
-
+#Barplot 
+#Q03 : sexe 
+tab <- table(escap[[2]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick"), main = "Répartition du sexe  selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
 ```
 
-Etant débarassé de la non réponse, on peut passer à l'implémentation de nos modèles.
+```{r}
+#Q04 : Situation 
+tab <- table(escap[[3]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick"), main = "Répartition de la situation personnelle selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q04A : Situation scolaire 
+tab <- table(escap[[4]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple"), main = "Répartition de la situation vis-à-vis des études selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q04B : Situation pro 
+tab <- table(escap[[5]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "green"), main = "Répartition de la situation pro selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q05 : redoublement 
+tab <- table(escap[[6]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick"), main = "Répartition du redoublement selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q06A 
+tab <- table(escap[[7]], escap[[18]])
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow"), main = "Répartition du niveau de difficulté à lire selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q06B 
+tab <- table(escap[[8]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow"), main = "Répartition du niveau de difficulté à écrire selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q08 
+tab <- table(escap[[9]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black"), main = "Répartition du lieu de vie selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q08C 
+tab <- table(escap[[10]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black"), main = "Répartition de la configuration parentale selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q09A1 
+tab <- table(escap[[11]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black", "green", "orange"), main = "Répartition de la situation du père selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q09B1 
+tab <- table(escap[[12]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black", "green", "orange"), main = "Répartition de la situation de la mère selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q10A1 
+tab <- table(escap[[13]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black", "green", "orange", "blue", "red", "gray"), main = "Répartition de la PCS du père selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#Q10B1 
+tab <- table(escap[[14]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black", "green", "orange", "blue", "red", "gray"), main = "Répartition de la PCS de la mère selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#B08A 
+tab <- table(escap[[15]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black", "green"), main = "Répartition de la consommation du père selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+```{r}
+#B08B 
+tab <- table(escap[[16]], escap[[18]]) 
+barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple", "black", "green"), main = "Répartition de la consommation de la mère selon l'âge de première consommation", xlab = "Y", ylab = "Q03")
+```
+
+L'inspection des graphiques en barre croisés ne soulève pas de lien évident entre chaque prédicteur et Y. Dans chacune des modalités de Y, les modalités des prédicteurs semblent se transposer dans des proportions relativement similaires. On ne peut donc pas tirer de premières conclusions.
+
+# Création d'un jeu de donnée imputé avec le package missmda
+
+Pour pouvoir mener nos analyser et traiter la non réponse partielle dans nos individus, nous choisissons d'imputer les données manquantes, tant dans les prédicteurs que dans Y. Nous utilisons le package missmda.
+
+```{r}
+df_MCA <- escap |> select(-c(pm17B,A01))
+df_MCA <- df_MCA |> mutate(across(everything(), as.factor))
+rownames(df_MCA) <- escap$A01
+
+
+res <- MCA(escap)
+ # nb_comp <- estim_ncpMCA(df_MCA, ncp.max = 5, method.cv = "Kfold", nbsim = 20)
+ # nb_comp = 5
+data_complete <- imputeMCA(df_MCA, 5)
+data_complete <- data_complete$completeObs
+```
+
+```{r}
+write.csv(data_complete,
+          file = "Impute_missMDA_gab.csv",
+          row.names = FALSE)
+```
 
 # Stacking de XGboost et RF
 
@@ -613,29 +626,21 @@ Etant débarassé de la non réponse, on peut passer à l'implémentation de nos
 
 ```{r}
 
-df <- read.csv2(
-  "Imputé final.csv",
-  sep = ";",
+data_rf <- read.csv2(
+  "Impute_missMDA_gab.csv",
+  sep = ",",
   stringsAsFactors = FALSE
 )
+data_rf <- data_rf |> mutate(across(1:16, as.factor))
 
-df[, c(2:16,18)] <- lapply(
-  df[, c(2:16,18)],
-  factor
-)
+poids_texte <- escap$pm17B
 
-# Mise en forme des données
-data_rf <- df[, c(18, 2:17)]
-names(data_rf)[1] <- "Y"
+# 2. On remplace la virgule par un point avec gsub()
+poids_propre <- gsub(",", ".", poids_texte)
 
-data_rf$Y <- factor(
-  data_rf$Y
-)
+# 3. On convertit en numeric et on l'assigne à data_rf
+data_rf$pm17B <- as.numeric(poids_propre)
 
-# Poids
-data_rf$pm17B <- as.numeric(
-  as.character(data_rf$pm17B)
-)
 
 ```
 
@@ -683,10 +688,10 @@ folds <- createFolds(
 # Paramètres de RF
 
 ```{r}
+# Sécurisation préalable des types
+train_data$Y <- as.factor(as.character(train_data$Y))
+rf_features  <- setdiff(names(train_data), c("Y", "pm17B"))
 
-################################################################################
-# TUNING RANDOM FOREST PAR VALIDATION CROISEE
-################################################################################
 
 # Variables explicatives
 rf_features <- setdiff(
@@ -701,67 +706,52 @@ rf_grid <- expand.grid(
   min.node.size = c(1, 5, 10)
 )
 
-# Par VC, on teste le nb d'arbres, mtry et la taille de noeud minimale des arbres de la RF
-# Attention c'est un peu lourd à compiler
-
+################################################################################
+# TUNING RANDOM FOREST PAR VALIDATION CROISEE
+################################################################################
 rf_results <- rf_grid %>%
   mutate(
     cv_error = pmap_dbl(
-      list(
-        mtry,
-        num.trees,
-        min.node.size
-      ),
+      list(mtry, num.trees, min.node.size),
       function(m, ntree, node) {
-
+        
         fold_errors <- map_dbl(
           folds,
           function(valid_index) {
-
-            train_fold <- train_data[
-              -valid_index,
-              ,
-              drop = FALSE
-            ]
-
-            valid_fold <- train_data[
-              valid_index,
-              ,
-              drop = FALSE
-            ]
-
+            
+            train_fold <- train_data[-valid_index, , drop = FALSE]
+            valid_fold <- train_data[valid_index, , drop = FALSE]
+            
+            # Entraînement avec ranger
             model <- ranger(
-              Y ~ . - pm17B,
-              data = train_fold,
-              mtry = m,
-              num.trees = ntree,
-              min.node.size = node,
-              importance = "permutation",
-              classification = TRUE,
-              probability = FALSE,
-              case.weights = train_fold$pm17B
+              formula        = Y ~ . - pm17B,
+              data           = train_fold,
+              mtry           = m,
+              num.trees      = ntree,
+              min.node.size  = node,
+              case.weights   = train_fold$pm17B,
+              probability    = FALSE
             )
-
+            
+            # Prédictions sur le pli de validation
             pred <- predict(
               model,
-              data = valid_fold[
-                ,
-                rf_features,
-                drop = FALSE
-              ]
+              data = valid_fold[, rf_features, drop = FALSE]
             )$predictions
-
-            mean(
-              pred != valid_fold$Y
-            )
+            
+            # Calcul du taux d'erreur pondéré par les poids de sondage
+            weighted.mean(pred != valid_fold$Y, w = valid_fold$pm17B)
           }
         )
-
+        
+        # Moyenne des erreurs sur l'ensemble des plis
         mean(fold_errors)
       }
     )
   )
+```
 
+```{r}
 # Meilleur modèle
 best_rf <- rf_results %>%
   slice_min(
@@ -770,10 +760,10 @@ best_rf <- rf_results %>%
     with_ties = FALSE
   )
 
-rf_mtry <- best_rf$mtry
-rf_ntree <- best_rf$num.trees
-rf_node <- best_rf$min.node.size
-
+rf_mtry <- best_rf$mtry #3
+rf_ntree <- best_rf$num.trees #500
+rf_node <- best_rf$min.node.size #10
+#erreur CV = 0.5821
 cat(
   "Meilleur modèle : mtry =",
   rf_mtry,
@@ -817,8 +807,8 @@ ggplot(
 ```{r}
 
 
-rf_mtry #2 
-rf_ntree #100
+rf_mtry # 3
+rf_ntree #500
 rf_node  #10
 ```
 
@@ -995,6 +985,7 @@ cat(
   "\n"
 )
 
+#meilleur param :  max_depth = 5 , nrounds = 200 , eta = 0.1 , erreur CV = 0.7936 
 ```
 
 ```{r}

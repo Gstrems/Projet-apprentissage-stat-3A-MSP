@@ -1,5 +1,5 @@
 ---
-title: "Projet Apprentissage Statistique -groupe  Gabriel Stremsdoerfer et Denis"
+title: "Proj Gabriel-Denis"
 format: pdf
 editor: visual
 ---
@@ -14,13 +14,7 @@ editor: visual
 
 library(mice)
 library(tidyverse)
-```
-
-```{r}
-
-```
-
-```{library(dplyr)}
+library(dplyr)
 library(FactoMineR)
 library(missMDA)
 library(ranger)
@@ -42,13 +36,10 @@ library(nnet)
 ```{r}
 setwd(getwd())
 escap = read.csv("ESCAP.csv", sep = ';')
+summary(escap)
 ```
 
-`{summary(escap)}`
-
 ## Discrétisation de Y
-
-Comme convenu en cours, on considère que les non-répondants ne sont pas concernés par la question : on doit donc discrétiser la variable. De plus, on remarque une concentration très importante autour des ages 14,15 et 16. Pour maintenir des effectifs équilibrés sans perdre trop d'information, on utilise les quintiles et on discrétise la variable.
 
 ```{r}
 
@@ -79,44 +70,13 @@ table(escap$Y)
 
 ```
 
-## Traitement des données manquantes
-
-Dans la table de données ESCAP, toutes les variables sont concernées par la non réponse, aussi bien dans notre variable d'intérêt (âge de la première consommation d'alcool) que dans les prédicteurs.
+Comme convenu en cours, on considère que les non-répondants ne sont pas concernés par la question : on doit donc discrétiser la variable. De plus, on remarque une concentration très importante autour des ages 14,15 et 16. Pour maintenir des effectifs équilibrés sans perdre trop d'information, on utilise les quintiles et on discrétise la variable.
 
 ```{r}
-#### Construction d'une table de non réponse : 
-# 1 = réponse pour la variable concernée
-# 0 = NR
-table_NR <- data.frame( id = escap$A01,
-                        Q03 = ifelse(!(is.na(escap$Q03)), 1, 0),
-                        Q04 = ifelse(!(is.na(escap$Q04)), 1, 0),
-                        Q04A = ifelse(!(is.na(escap$Q04A)), 1, 0),
-                        Q04B = ifelse(!(is.na(escap$Q04B)), 1, 0),
-                        Q05 =  ifelse(!(is.na(escap$Q05)), 1, 0),
-                        Q06A = ifelse(!(is.na(escap$Q06A)), 1, 0),
-                        Q06B = ifelse(!(is.na(escap$Q06B)), 1, 0),
-                        Q08 = ifelse(!(is.na(escap$Q08)), 1, 0),
-                        Q08C = ifelse(!(is.na(escap$Q08C)), 1, 0),
-                        Q09A1 = ifelse(!(is.na(escap$Q09A1)), 1, 0),
-                        Q09B1 = ifelse(!(is.na(escap$Q09B1)), 1, 0),
-                        Q10A1 = ifelse(!(is.na(escap$Q10A1)), 1, 0),
-                        Q10B1 = ifelse(!(is.na(escap$Q10B1)), 1, 0),
-                        B08A = ifelse(!(is.na(escap$B08A)), 1, 0),
-                        B08B = ifelse(!(is.na(escap$B08B)), 1, 0)
-)
-table_NR$nb_nr <-15 -rowSums(table_NR[,-1])
-table_NR$pds <- escap$pm17B
-#variables les plus touchées par la non réponse
-nr_var <- 13314 - colSums(table_NR |> select(-c("id", "pds", "nb_nr"))) 
-nr_var
 
-```
+#Q03 : sexe
+indiv_nr_Q03 <- escap[which(is.na(escap$Q03)),1]
 
-Cependant, il faut distinguer la non réponse et le fait de ne pas être concerné par la question. Là où l'on pouvait s'en assurer, nous avons donc ajouté des modalités "0" pour désigner le fait de ne pas être concerné.
-
-Ici, on s'est intéressé aux variables Q04, Q04A et Q04B. C'est à dire les variables traitant de la situation scolaire et/ou professionnelle. En supposant que situation professionnelle et scolaires s'excluent la plupart du temps, on a déduit une non-réponse conditionnelle dans les cas où une seule des deux variable était sans réponse. C'est à dire que dans la grande majorité des cas, un répondant qui travaille ne fait pas d'étude et inversement.
-
-```{r}
 #Q04
 indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
 
@@ -126,7 +86,7 @@ indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
 indiv_nr_Q04AB <- escap |> 
   filter(is.na(Q04A) & is.na(Q04B)) |> 
   select(A01)
-cat("Le nombre d'individus non répondants à Q04A et Q04B est de", length(indiv_nr_Q04AB$A01), "\n")
+
 #Q0A : individus répondants et non répondants exceptés individus NR pour A et B
 indiv_nr_Q04A <- escap |> 
   filter(!(A01 %in% indiv_nr_Q04AB$A01)) |> 
@@ -151,18 +111,21 @@ indiv_r_Q04B <- escap |>
 diff_r_Q0B_nr_Q0A <- setdiff(
   indiv_nr_Q04A,
   indiv_r_Q04B
-) #0 : dans les faits, répondre à Q04B => ne pas répondre à Q04A
+) #0
 
 #individus hors intersection entre répondre à Q04A et ne pas répondre à Q04B
 diff_r_Q0A_nr_Q0B <- setdiff(
   indiv_nr_Q04B,
   indiv_r_Q04A
-) #0 : : dans les faits, répondre à Q04A => ne pas répondre à Q04B
-```
+) #0
 
-On converti alors les NA des non concernés en une modalité "0"
+#on en conclut que ormis les 76 : tous non concernés
+pds_indiv_nr_Q04AB <- escap |> 
+  filter(A01 %in% indiv_nr_Q04AB$A01) |> 
+  select(pm17B)
 
-```{r}
+pds_indiv_nr_Q04AB <- pds_indiv_nr_Q04AB$pm17B
+
 #On impute une nouvelle modalité : 0 = "Non concerné" pour Q04A et Q04B
 
 #Q04A
@@ -186,14 +149,10 @@ escap <- escap |>
   )
 
 indiv_nr_Q04AB <- indiv_nr_Q04AB$A01
-```
 
-Pour Q04 on tient le raisonnement inverse : Si une réponse de Q04A ou de Q04B est spécifiée (à part 0), on peut déduire dans ce cas la "vraie" réponse.
-
-```{r}
 #Q04
 # est-ce que le volume de NR peut être réduit avec info de Q04A et Q04B ?
-indiv_nr_Q04 <- escap[which(is.na(escap$Q04)),1]
+
 indiv_r_Q04AB <- escap |> 
   filter(!(is.na(Q04A)) & !(is.na(Q04B))) |> 
   select(A01)
@@ -217,14 +176,54 @@ escap <- escap |>
     )
   )
 
-#ici on a une hypothèse : travailler (ou rechercher un emploi) <=> arrêter ses études
-#Comme on a vu que les non réponses dans Q04A et Q04B étaient vraisemblablement des 
-#réponses de non concerné, cette hypothèse est crédible.
+#ici on a une hypothèse : travailler (ou rechercher) = arrêter ses études
+#néanmoins on a vu que les non réponses dans Q04A et Q04B étaient vraisemblablement des 
+#réponses de non concerné : donc pour nos individus cette hypothèse est crédible.
+
+#Q05 : redoublement 
+any(is.na(escap$Q05))#TRUE
+
+indiv_nr_Q05 <- escap |> 
+  filter(is.na(Q05)) |> 
+  select(A01)
+
+indiv_nr_Q05 <- indiv_nr_Q05$A01
+
+setdiff(
+  indiv_nr_Q05,
+  indiv_nr_Q04AB
+) #36 sur 40 sont pas parmi les non répondants de A et B
+
 ```
 
-Concernant les questions touchant aux parents : Q08C (vie des parents), Q09A1 (situation du père), Q09B1 (situation de la mère), Q10A1 (PCS du père), Q10B1 (PCS de la mère), B08A (consommation d'alcool du père) et B08A (consommation d'alcool de la mère), on arrive à réduire le nombre de non répondant en repérant parmis ces derniers ceux n'ayant pas connu l'un ou l'autre de leurs parents.
+Ici, on s'est intéressé aux variables Q04, Q04A et Q04B. C'est à dire les variables traitant de la situation scolaire et/ou professionnelle. Avec quelques manipulations, on a pu réduire la non-réponse conditionnelle présente dans ces variables. C'est à dire que dans la grande majorité des cas, un répondant qui travaille ne fait pas d'étude et inversement.
 
 ```{r}
+
+#Q06A et B
+any(is.na(escap$Q06A))#TRUE
+
+indiv_nr_Q06A <- escap |> 
+  filter(is.na(Q06A)) |> 
+  select(A01)
+
+indiv_nr_Q06A <- indiv_nr_Q06A$A01
+
+any(is.na(escap$Q06B))#TRUE
+
+indiv_nr_Q06B <- escap |> 
+  filter(is.na(Q06B)) |> 
+  select(A01)
+
+indiv_nr_Q06B <- indiv_nr_Q06B$A01
+
+#intersections entre non répondants ?
+setdiff(indiv_nr_Q06B, indiv_nr_Q06A)
+setdiff(indiv_nr_Q06A, indiv_nr_Q06B)
+
+#globalement, peu d'individus n'ont pas répondu aux deux questions 
+
+
 #Q08
 any(is.na(escap$Q08))#TRUE
 
@@ -371,6 +370,14 @@ escap$Q10B1 <- as.factor(escap$Q10B1)
 
 
 #B08A
+any(is.na(escap$B08A))#TRUE
+
+indiv_nr_B08A <- escap |> 
+  filter(is.na(B08A)) |> 
+  select(A01)
+
+indiv_nr_B08A <- indiv_nr_B08A$A01 #1400 non répondants
+
 #ajout d'une nouvelle modalité : 0 = non concerné
 escap <- escap |> 
   mutate(
@@ -406,7 +413,15 @@ escap$B08A <- as.factor(escap$B08A)
 
 
 #B08B
-#ajout d'une nouvelle modalité: 0 = non concerné
+any(is.na(escap$B08B))#TRUE
+
+indiv_nr_B08B <- escap |> 
+  filter(is.na(B08B)) |> 
+  select(A01)
+
+indiv_nr_B08B <- indiv_nr_B08B$A01 #1050 non répondants
+
+#on ajoute une modalité: 0 = non concerné
 escap <- escap |> 
   mutate(
     B08B = ifelse(
@@ -430,15 +445,18 @@ escap <- escap |>
       B08B
     )
   )
+
+indiv_nr_B08B <- escap |> 
+  filter(is.na(B08B)) |> 
+  select(A01)
+
+indiv_nr_B08B <- indiv_nr_B08B$A01 
+
+escap$B08B <- as.factor(escap$B08B)
+
 ```
 
-Ces quelques manipulations nous ont permis de réduire le niveau de nombre de non-réponses dans les prédicteurs adéquats.
-
-```{r}
-escap <- escap |> 
-  mutate(across(2:17, as.factor))
-summary(escap)
-```
+En observant les différentes modalités de certaines questions, on a à nouveau pu réduire les non-réponses dans des variables liées. Notamment, lorsqu'un répondant déclare sa mère comme décédée ou perdue de vue, il ne peut logiquement pas déclarer sa consommation d'alcool.
 
 ## Suppression des individus avec trop de Non-réponse
 
@@ -496,7 +514,7 @@ escap = escap[
 
 #############################################################
 
-#RENORMALISATION DES POIDS
+#REPONDERATION
 
 escap$pm17B <- escap$pm17B *
   nrow(escap) /
@@ -507,8 +525,6 @@ escap$pm17B <- escap$pm17B *
 Le poids cumulé est proche du nombre d'individus perdus. Sachant que la moyenne des poids est à 1, on estime que les poids des individus perdus sont bien répartis. On répondère bien les poids après coup et on a donc un jeu de donnée qu'on peut imputer avec confiance.
 
 ## Création d'un jeu de donnée imputé
-
-Concernant les individus non répondants restants dans les prédicteurs, on procède par imputation multiple via le package mice
 
 ```{r}
 
@@ -589,11 +605,7 @@ write.csv2(
 
 ```
 
-Statistique descriptive
-
-```{r}
-
-```
+Etant débarassé de la non réponse, on peut passer à l'implémentation de nos modèles.
 
 # Stacking de XGboost et RF
 

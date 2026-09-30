@@ -807,15 +807,9 @@ ggplot(
 ```
 
 ```{r}
+rf_mtry 
+rf_ntree 
 
-
-<<<<<<< HEAD:Copie_quarto_final.qmd
-rf_mtry # 3
-rf_ntree #500
-=======
-rf_mtry #2 
-rf_ntree #200
->>>>>>> 8e7d5aa318535c068327cadacd1b88a9e5fc3421:Quarto complet.qmd
 rf_node  #10
 ```
 

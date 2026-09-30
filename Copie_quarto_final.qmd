@@ -597,6 +597,10 @@ barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple"
 
 L'inspection des graphiques en barre croisés ne soulève pas de lien évident entre chaque prédicteur et Y. Dans chacune des modalités de Y, les modalités des prédicteurs semblent se transposer dans des proportions relativement similaires. On ne peut donc pas tirer de premières conclusions.
 
+```{r}
+#information mutuelle 
+```
+
 # Création d'un jeu de donnée imputé avec le package missmda
 
 Pour pouvoir mener nos analyser et traiter la non réponse partielle dans nos individus, nous choisissons d'imputer les données manquantes, tant dans les prédicteurs que dans Y. Nous utilisons le package missmda.
@@ -1490,3 +1494,17 @@ cat("\n--- Matrice pondérée Stacking ---\n")
 print(weighted_cm_stack)
 
 ```
+
+# Idées pour améliorer prédiction:
+
+1\)
+
+Pour simplifier le problème d'apprentissage et gagner en prédictibilité, je propose de considérer le problème du point de vue d'une classification binaire. Pour déterminer les regroupements des modalités, nous proposons de considérer plusieurs découpages, d'entraîner un modèle sur chacun et comparer les performances de prédiction entre découpages uniquement sur TRAIN. Une fois le meilleur découpage binaire séléctionné, on conserve cette binarisation et on regarde les performances sur TEST.
+
+2\)
+
+En ayant discrétisé Y sur les quintiles, on a peut être éclaté des individus aux profils et à l'âge de première consommation homogènes, qu'on a alors mélangé avec d'autres distincts, ce qui a brouillé les pistes. Je propose de rediscrétiser les modalités de Y sur la base d'un clustering. NB : le clustering devra se faire uniquement sur TRAIN (sinon on apprend indirectement des données TEST). Pour ce faire on peut recourir à une méthode basée sur l'acm et implémentable avec `FactoMineR`, via la fonction "chclust".
+
+3\)
+
+il existe un package pour faire des random forest spécialisé pour prédire une variable ordinale: `ordinalForest`

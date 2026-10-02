@@ -41,6 +41,8 @@ library(SHAPforxgboost)
 library(questionr)
 library(nnet)
 library(purrr)
+library(iml) #pour ALE
+library(shapviz)
 ```
 
 ```{r}
@@ -597,10 +599,6 @@ barplot(tab, legend = TRUE, col = c("steelblue", "firebrick", "yellow", "purple"
 
 L'inspection des graphiques en barre croisés ne soulève pas de lien évident entre chaque prédicteur et Y. Dans chacune des modalités de Y, les modalités des prédicteurs semblent se transposer dans des proportions relativement similaires. On ne peut donc pas tirer de premières conclusions.
 
-```{r}
-#information mutuelle 
-```
-
 # Création d'un jeu de donnée imputé avec le package missmda
 
 Pour pouvoir mener nos analyser et traiter la non réponse partielle dans nos individus, nous choisissons d'imputer les données manquantes, tant dans les prédicteurs que dans Y. Nous utilisons le package missmda.
@@ -782,7 +780,7 @@ cat(
 
 ```
 
-Meilleur modèle : mtry = 2 , ntree = 200 , min.node.size = 10 , erreur CV = 0.6959
+Meilleur modèle : mtry = 3 , ntree = 500 , min.node.size = 10 , erreur CV = 0.58210.5821
 
 ```{r}
 
@@ -811,8 +809,8 @@ ggplot(
 ```
 
 ```{r}
-rf_mtry 
-rf_ntree 
+rf_mtry #3
+rf_ntree #500
 
 rf_node  #10
 ```
@@ -1031,9 +1029,9 @@ ggplot(
 
 ```{r}
 
-xgb_max_depth #4
-xgb_nrounds #300
-xgb_eta #0.05
+xgb_max_depth #5
+xgb_nrounds #200
+xgb_eta #0.1
 
 ```
 
@@ -1042,6 +1040,8 @@ Avec les paramètres de RF et XGBoost, on peut passer au stacking.
 # Stacking
 
 ## Préparation des folds
+
+On sépare TRAIN en plusieurs sous-ensembles de taille et de composition homogène (Folds) pour éviter les risques de data leakage entre les modèles de premier niveau (RF, XGBOOST) et le méta-modèle.
 
 ```{r}
 
@@ -1079,8 +1079,6 @@ oof_xgb <- matrix(
 )
 
 ```
-
-On passe aux folds.
 
 ```{r}
 
@@ -1192,6 +1190,8 @@ for (i in seq_along(folds)) {
 
 ## Méta-modèle multinomial
 
+Justifier ce méta modèle
+
 ```{r}
 
 meta_data <- data.frame(
@@ -1210,6 +1210,8 @@ meta_model <- multinom(
 ```
 
 ## RF et XGBoost finaux
+
+Nous testons XGBoost et RF sur TEST avec leurs hyperparamètres optimisés par validation croisée sur TRAIN.
 
 ```{r}
 
@@ -1445,6 +1447,8 @@ weighted_cm_stack <- weighted_confusion(
 
 ```
 
+# Analyse Post-hoc des modèles 
+
 ## Importance des variables
 
 ```{r}
@@ -1459,6 +1463,62 @@ rf_importance <- sort(
 xgb_importance <- xgb.importance(
   model = final_xgb
 )
+
+```
+
+```{r}
+# --- Mise en forme des deux importances dans un format commun ---
+
+df_rf <- data.frame(
+  variable = names(rf_importance),
+  importance = as.numeric(rf_importance),
+  modele = "Random Forest"
+)
+
+df_xgb <- data.frame(
+  variable = xgb_importance$Feature,
+  importance = xgb_importance$Gain,   # "Gain" = contribution à la réduction de la perte
+  modele = "XGBoost"
+)
+
+# --- Graphique Random Forest ---
+ggplot(df_rf[1:15, ], aes(x = reorder(variable, importance), y = importance)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Importance des variables - Random Forest",
+       x = NULL, y = "Importance") +
+  theme_minimal()
+
+
+```
+
+```{r}
+# --- Graphique XGBoost ---
+ggplot(df_xgb[1:15, ], aes(x = reorder(variable, importance), y = importance)) +
+  geom_col(fill = "darkorange") +
+  coord_flip() +
+  labs(title = "Importance des variables - XGBoost",
+       x = NULL, y = "Gain") +
+  theme_minimal()
+```
+
+## Valeurs de Shapley 
+
+Ici, pour chaque variable et chacune de leurs modalités est affiché la moyenne des valeurs de shapley en valeur absolue.
+
+Exemple : Avoir redoublé (Q052) fait varier en moyenne d'environ 25% la probabilité d'être affecté à la modalité 5 (17+).
+
+```{r}
+shap_multi <- shapviz(final_xgb, X_pred = as.matrix(x_train), X = x_train)
+
+# graphiques pour toutes les classes 
+sv_importance(shap_multi, kind = "bar")
+
+```
+
+## Accumulated Local Effect 
+
+```{r}
 
 ```
 
@@ -1494,6 +1554,16 @@ cat("\n--- Matrice pondérée Stacking ---\n")
 print(weighted_cm_stack)
 
 ```
+
+En l'état, les performances prédictives de nos modèles sont assez faibles, surtout pour XGBOOST.
+
+En étudiant les matrices de confusion, on observe que XGboost a tendance à prédire de manière relativement uniforme les individus dans les modalités de Y, au contraire de la forêt aléatoire qui prédit quasiment par le mode (15 ans) pour la majorité des individus. La combinaison des deux modèles par le stacking améliore très légèrement la qualité de prédiction mais évince totalement les modalités 14 et 17+ et continue de prédire en grande majorité la modalité 15.
+
+Nous retenons de l'analyse post hoc que pour la forêt aléatoire, les variables associées à la consommation des parents et dans une moindre mesure, la catégorie sociale sont prépondérantes pour prédire l'âge de première consommation.
+
+Concernant Xgboost, les variables enregistrant le plus de gain compte tenu de la fonction objectif sont La consommation d'alcool du père et le fait d'avoir redoublé. Contrairement à RF qui marque une nette séparation, le gain des prédicteur chez Xgboost décroît de manière plus continue. Enfin, le classement
+
+Ces observations doivent être considérées avec prudence compte tenu de la faible propension des modèles à bien prédire.
 
 # Idées pour améliorer prédiction:
 

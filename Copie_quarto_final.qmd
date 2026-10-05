@@ -1835,38 +1835,37 @@ plot(shapley_one)
 
 En regardant les deux valeurs extrêmes :
 
--   Ëtre non concerné par la questions sur la consommation d'alcool de la mère contribue plus qu'aucune autre modalité à orienter le modèle vers une prédiction du premier verre d'alcool à 15 ans.
+-   Ëtre non concerné par la question sur la consommation d'alcool de la mère contribue plus qu'aucune autre modalité à orienter le modèle vers une prédiction du premier verre d'alcool à 15 ans.
 
--   Le fait que l'individu répondant soit un homme tire plutôt le modèle vers d'autres classes que 15 ans. Probablement parce que les répondants hommes boivent plus jeunes.
+-   Le fait que l'individu répondant soit un homme tire plutôt le modèle vers d'autres classes que 15 ans. Probablement parce que les répondants hommes boivent quand ils sont plus jeunes.
 
 
 ## Résultats finaux à comparer
 
 ```{r}
 
-cat("\n--- RF ---\n")
 print(cm_rf)
 
-cat("\n--- XGBoost ---\n")
+```
+RF semble prédire la modalité 15 (ans) peut importe l'individu et a beaucoup de mal à prédire les autres classes. Malgré tout, cela nous donne une accuracy proche de 0.4, plus performante que le hasard.
+
+```{r}
 print(cm_xgb)
 
-cat("\n--- Stacking ---\n")
+```
+
+Avec une accuracy à 0.2 et une matrice de confusion aussi bien répartie, notre xgboost semble être à peine meilleur que le hasard. 
+
+```{r}
+
 print(cm_stack)
 
-cat("\n--- Accuracy ---\n")
-print(accuracy_results)
-
-
-cat("\n--- Matrice pondérée RF ---\n")
-print(weighted_cm_rf)
-
-cat("\n--- Matrice pondérée XGBoost ---\n")
-print(weighted_cm_xgb)
-
-cat("\n--- Matrice pondérée Stacking ---\n")
-print(weighted_cm_stack)
-
 ```
+
+Notre stacking a la  meilleure accuracy. On voit à sa matrice de confusion qu'il est assez proche de RF mais a amélioré sa prévision sur les 13 ans et moins et les 16 ans. 
+
+
+
 
 En l'état, les performances prédictives de nos modèles sont assez faibles, surtout pour XGBOOST.
 

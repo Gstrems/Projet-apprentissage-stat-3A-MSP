@@ -20,8 +20,8 @@ editor: visual
 
 ## Importation des données et librairies
 
-```{r}
-
+```{r, include=FALSE}
+library(lime)
 library(mice)
 library(tidyverse)
 library(dplyr)
@@ -43,6 +43,8 @@ library(nnet)
 library(purrr)
 library(iml) #pour ALE
 library(shapviz)
+library(gridExtra)
+
 ```
 
 ```{r}
@@ -603,7 +605,7 @@ L'inspection des graphiques en barre croisés ne soulève pas de lien évident e
 
 Pour pouvoir mener nos analyser et traiter la non réponse partielle dans nos individus, nous choisissons d'imputer les données manquantes, tant dans les prédicteurs que dans Y. Nous utilisons le package missmda.
 
-```{r}
+```{r, eval = FALSE}
 df_MCA <- escap |> select(-c(pm17B,A01))
 df_MCA <- df_MCA |> mutate(across(everything(), as.factor))
 rownames(df_MCA) <- escap$A01
@@ -616,7 +618,7 @@ data_complete <- imputeMCA(df_MCA, 5)
 data_complete <- data_complete$completeObs
 ```
 
-```{r}
+```{r, eval = FALSE}
 write.csv(data_complete,
           file = "Impute_missMDA_gab.csv",
           row.names = FALSE)
@@ -685,14 +687,16 @@ folds <- createFolds(
   returnTrain = FALSE
 )
 
+
+# Sécurisation préalable des types
+train_data$Y <- as.factor(as.character(train_data$Y))
+rf_features  <- setdiff(names(train_data), c("Y", "pm17B"))
+
 ```
 
 # Paramètres de RF
 
-```{r}
-# Sécurisation préalable des types
-train_data$Y <- as.factor(as.character(train_data$Y))
-rf_features  <- setdiff(names(train_data), c("Y", "pm17B"))
+```{r, eval = FALSE}
 
 
 # Variables explicatives
@@ -751,6 +755,12 @@ rf_results <- rf_grid %>%
       }
     )
   )
+
+saveRDS(rf_results, "rf_results.rds")
+```
+
+```{r, include = FALSE}
+rf_results <- readRDS("rf_results.rds")
 ```
 
 ```{r}
@@ -765,6 +775,7 @@ best_rf <- rf_results %>%
 rf_mtry <- best_rf$mtry #3
 rf_ntree <- best_rf$num.trees #500
 rf_node <- best_rf$min.node.size #10
+
 #erreur CV = 0.5821
 cat(
   "Meilleur modèle : mtry =",
@@ -773,53 +784,21 @@ cat(
   rf_ntree,
   ", min.node.size =",
   rf_node,
-  ", erreur CV =",
+  ", erreur_CV =",
   round(best_rf$cv_error, 4),
   "\n"
 )
 
 ```
 
-Meilleur modèle : mtry = 3 , ntree = 500 , min.node.size = 10 , erreur CV = 0.58210.5821
-
-```{r}
-
-# Visualisation de l'erreur CV
-ggplot(
-  rf_results %>%
-    filter(
-      min.node.size == rf_node
-    ),
-  aes(
-    x = num.trees,
-    y = cv_error,
-    color = as.factor(mtry)
-  )
-) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 2) +
-  labs(
-    title = "Erreur de validation croisée selon le nombre d'arbres et mtry",
-    x = "Nombre d'arbres (num.trees)",
-    y = "Erreur CV",
-    color = "mtry"
-  ) +
-  theme_minimal()
-
-```
-
-```{r}
-rf_mtry #3
-rf_ntree #500
-
-rf_node  #10
-```
+Meilleur modèle : mtry = 3 , ntree = 500 , min.node.size = 10 , erreur CV = 0.5821
 
 Voici donc les paramètres optimaux pour notre Random Forest.
 
 ## Paramètres de XGBoost
 
 ```{r}
+
 
 ################################################################################
 # TUNING XGBOOST PAR VALIDATION CROISEE
@@ -868,6 +847,9 @@ xgb_grid <- expand.grid(
   nrounds = c(50, 100, 150, 200, 300),
   eta = c(0.01, 0.05, 0.10, 0.20)
 )
+```
+
+```{r, eval = FALSE}
 
 ################################################################################
 # VALIDATION CROISEE
@@ -960,6 +942,17 @@ xgb_results <- xgb_grid %>%
       }
     )
   )
+
+
+saveRDS(xgb_results, "xgb_results.rds")
+```
+
+```{r, include = FALSE}
+xgb_results <- readRDS("xgb_results.rds")
+
+```
+
+```{r}
 
 ################################################################################
 # MEILLEURS PARAMETRES
@@ -1190,8 +1183,6 @@ for (i in seq_along(folds)) {
 
 ## Méta-modèle multinomial
 
-Justifier ce méta modèle
-
 ```{r}
 
 meta_data <- data.frame(
@@ -1401,7 +1392,9 @@ print(accuracy_results)
 
 ```
 
-## Matrices de confusion pondérées
+Nos premiers résultats ne sont pas encourageants étant donné qu'on a des accuracy à moins de 0.5. Cela dit, avant une accuracy au delà de 0.4 pour notre stacking, la combinaison de modèle est bien bénéfique puisqu'on gagne en prédiction par rapport à random forest ou xgboost seuls.
+
+## Matrices de confusion pondérées utilisées plus tard
 
 ```{r}
 
@@ -1447,80 +1440,405 @@ weighted_cm_stack <- weighted_confusion(
 
 ```
 
-# Analyse Post-hoc des modèles 
+# Analyse Post-hoc des modèles
 
-## Importance des variables
+Etant donné que nos deux modèles et le stacking sont des modèles "boites noires", on introduit des explicateurs dits "à posteriori".
+
+```{r}
+# Variables effectivement utilisées par le RF
+X_test_posthoc <- test_data[, rf_features, drop = FALSE]
+
+# Fonction de prédiction du RF :
+# on retourne les probabilités de chaque classe.
+predict_rf_prob <- function(model, newdata) {
+  predict(model, newdata)$predictions[, classes, drop = FALSE]
+}
+
+# Fonction permettant de sélectionner une classe pour les analyses
+# PDP / ALE / Shapley locales.
+target_class <- classes[which.max(table(train_data$Y))]
+target_class
+```
+
+Pour certaines des techniques d'analyse post-hoc qui nécessitent de viser une modalité, on se concentrera sur la modalité la plus peuplée : 15 ans.
+
+## 3. OOB error du Random Forest
+
+L'erreur OOB est une estimation de l'erreur de généralisation du Random Forest.
+
+```{r}
+# Erreur OOB du Random Forest final
+oob_error_rf <- final_rf$prediction.error
+
+oob_error_rf
+```
+
+L'erreur OOB est assez haute. La performance de notre Random Forest est décevante.
+
+# 4. Partial Dependence Plot (PDP)
+
+Le PDP permet d'étudier l'effet moyen d'une variable sur la probabilité d'appartenir à une classe donnée. Ici, pour limiter les graphiques, on s'intéresse à 15 ans, la modalité la plus peuplée.
+
+```{r}
+predictor_rf <- iml::Predictor$new(
+  model = final_rf,
+  data = X_test_posthoc,
+  y = test_data$Y,
+  predict.function = function(model, newdata) {
+    predict_rf_prob(model, newdata)[, target_class]
+  }
+)
+```
+
+On sélectionne les variables les plus importantes du Random Forest pour les étudier.
+
+```{r}
+top_pdp_vars <- names(
+  head(
+    sort(final_rf$variable.importance, decreasing = TRUE),
+    4
+  )
+)
+
+top_pdp_vars
+```
+
+On obtient les variables liées à la consommation d'alcool à la maison des parents et les CSP des parents.
+
+```{r}
+# PDP pour les variables les plus importantes
+
+pdp_results <- lapply(
+  top_pdp_vars,
+  function(v) {
+    effect <- iml::FeatureEffect$new(
+      predictor_rf,
+      feature = v,
+      method = "pdp",
+      grid.size = 20
+    )
+
+    effect
+  }
+)
+
+names(pdp_results) <- top_pdp_vars
+
+
+# Créer les graphiques PDP
+pdp_plots <- lapply(
+  seq_along(pdp_results),
+  function(i) {
+    v <- top_pdp_vars[i]
+    
+    plot(pdp_results[[i]]) +
+      ggtitle(
+        paste(
+          "Partial Dependence Plot -",
+          v,
+          "- classe",
+          target_class
+        )
+      )
+  }
+)
+
+
+gridExtra::grid.arrange(
+  grobs = pdp_plots,
+  ncol = 2,
+  nrow = 2
+)
+```
+
+Pour ces quatre variables, les PDP sont quasiment constant, peu importe la modalité. Donc la variation (de modalité) de ces variables a peu d'effet sur la prédiction.
+
+# 5. Accumulated Local Effects (ALE)
 
 ```{r}
 
-# Importance RF
-rf_importance <- sort(
-  final_rf$variable.importance,
-  decreasing = TRUE
+ale_results <- lapply(
+  top_pdp_vars,
+  function(v) {
+    effect <- iml::FeatureEffect$new(
+      predictor_rf,
+      feature = v,
+      method = "ale",
+      grid.size = 20
+    )
+    
+    effect
+  }
 )
 
-# Importance XGBoost
-xgb_importance <- xgb.importance(
-  model = final_xgb
+names(ale_results) <- top_pdp_vars
+
+
+# Créer les 4 graphiques ALE
+ale_plots <- lapply(
+  seq_along(ale_results),
+  function(i) {
+    v <- top_pdp_vars[i]
+    
+    plot(ale_results[[i]]) +
+      ggtitle(
+        paste(
+          "Accumulated Local Effects -",
+          v,
+          "- classe",
+          target_class
+        )
+      )
+  }
 )
 
+
+# Affichage en 2 x 2
+gridExtra::grid.arrange(
+  grobs = ale_plots,
+  ncol = 2,
+  nrow = 2
+)
+```
+
+On voit que pour le père comme pour la mère, les mêmes modalités sont les plus impactantes pour la prédiction quand on prédit pour la modalité la plus peuplée : 15 ans.
+
+Dans le cadre de la consommation d'alcoll (B08A et B), la non consommation d'alcool (1) ainsi que être non concerné par la question (0) ont un effet positif sur la prédiction, contrairement aux consommation d'alcool plus importantes qui ont donc un effet négatif sur la prédiction.
+
+Pour les CSP, ne être concerné par la question (modalité rajoutée pendant notre traitement de donnée) a un effet négatif important (0) sur la prédiction et la modalité : "Non concerné(e) (décédé(e), inconnu(e), perdu(e) de vue. . . " (9) a l'effet positif le plus important.
+
+# 6. Permutation Feature Importance (PFI)
+
+Le principe est de permuter une variable dans l'échantillon TEST puis de mesurer l'augmentation de l'erreur du modèle. On utilise le log-loss multiclasses, ce qui tient compte de l'ensemble des probabilités prédites et pas seulement de la classe finalement choisie.
+
+```{r}
+weighted_multiclass_logloss <- function(
+  truth,
+  probs,
+  weights
+) {
+
+  truth <- factor(truth, levels = classes)
+
+  # Probabilité attribuée à la vraie classe
+  p_true <- probs[
+    cbind(
+      seq_along(truth),
+      match(truth, colnames(probs))
+    )
+  ]
+
+  # Eviter log(0)
+  p_true <- pmin(
+    pmax(p_true, 1e-15),
+    1 - 1e-15
+  )
+
+  sum(
+    weights * (-log(p_true))
+  ) / sum(weights)
+}
+```
+
+Erreur de référence sur TEST :
+
+```{r}
+# Prédictions de référence
+probs_rf_test <- predict_rf_prob(
+  final_rf,
+  X_test_posthoc
+)
+
+baseline_logloss <- weighted_multiclass_logloss(
+  truth = test_data$Y,
+  probs = probs_rf_test,
+  weights = w_test
+)
+
+baseline_logloss
+```
+
+Calcul du PFI :
+
+```{r}
+set.seed(123)
+
+n_permutations <- 10
+
+pfi_results <- map_dfr(
+  rf_features,
+  function(v) {
+
+    permutation_losses <- numeric(n_permutations)
+
+    for (b in seq_len(n_permutations)) {
+
+      X_perm <- X_test_posthoc
+
+      X_perm[[v]] <- sample(
+        X_perm[[v]],
+        size = nrow(X_perm),
+        replace = FALSE
+      )
+
+      probs_perm <- predict_rf_prob(
+        final_rf,
+        X_perm
+      )
+
+      permutation_losses[b] <-
+        weighted_multiclass_logloss(
+          truth = test_data$Y,
+          probs = probs_perm,
+          weights = w_test
+        )
+    }
+
+    tibble(
+      Variable = v,
+      PFI_mean = mean(permutation_losses) - baseline_logloss,
+      PFI_sd = sd(permutation_losses),
+      PFI_min = min(permutation_losses) - baseline_logloss,
+      PFI_max = max(permutation_losses) - baseline_logloss
+    )
+  }
+) |>
+  arrange(desc(PFI_mean))
+
+pfi_results
 ```
 
 ```{r}
-# --- Mise en forme des deux importances dans un format commun ---
-
-df_rf <- data.frame(
-  variable = names(rf_importance),
-  importance = as.numeric(rf_importance),
-  modele = "Random Forest"
-)
-
-df_xgb <- data.frame(
-  variable = xgb_importance$Feature,
-  importance = xgb_importance$Gain,   # "Gain" = contribution à la réduction de la perte
-  modele = "XGBoost"
-)
-
-# --- Graphique Random Forest ---
-ggplot(df_rf[1:15, ], aes(x = reorder(variable, importance), y = importance)) +
-  geom_col(fill = "steelblue") +
+ggplot(
+  head(pfi_results, 15),
+  aes(
+    x = reorder(Variable, PFI_mean),
+    y = PFI_mean
+  )
+) +
+  geom_col() +
   coord_flip() +
-  labs(title = "Importance des variables - Random Forest",
-       x = NULL, y = "Importance") +
+  labs(
+    title = "Permutation Feature Importance - Random Forest",
+    x = NULL,
+    y = "Augmentation moyenne du log-loss"
+  ) +
   theme_minimal()
+```
 
+Les variables dont la permutation réduit le plus notre prédiction sont les consommations d'alcool des parents : B08A et B08B.
 
+# 7. LOFO - Leave One Feature Out
+
+Le LOFO consiste à retirer une variable, ré-estimer le modèle puis comparer sa performance au modèle complet.
+
+```{r}
+lofo_results <- map_dfr(
+  rf_features,
+  function(v) {
+
+    features_without_v <- setdiff(
+      rf_features,
+      v
+    )
+
+    formula_lofo <- as.formula(
+      paste(
+        "Y ~",
+        paste(features_without_v, collapse = " + ")
+      )
+    )
+
+    rf_lofo <- ranger(
+      formula_lofo,
+      data = train_data,
+      num.trees = rf_ntree,
+      mtry = min(
+        rf_mtry,
+        length(features_without_v)
+      ),
+      min.node.size = rf_node,
+      probability = TRUE,
+      case.weights = w_train,
+      seed = 999
+    )
+
+    probs_lofo <- predict(
+      rf_lofo,
+      test_data[, features_without_v, drop = FALSE]
+    )$predictions[, classes, drop = FALSE]
+
+    logloss_lofo <- weighted_multiclass_logloss(
+      truth = test_data$Y,
+      probs = probs_lofo,
+      weights = w_test
+    )
+
+    tibble(
+      Variable = v,
+      LogLoss_complet = baseline_logloss,
+      LogLoss_sans_variable = logloss_lofo,
+      LOFO = logloss_lofo - baseline_logloss
+    )
+  }
+) |>
+  arrange(desc(LOFO))
+
+lofo_results
 ```
 
 ```{r}
-# --- Graphique XGBoost ---
-ggplot(df_xgb[1:15, ], aes(x = reorder(variable, importance), y = importance)) +
-  geom_col(fill = "darkorange") +
+ggplot(
+  head(lofo_results, 15),
+  aes(
+    x = reorder(Variable, LOFO),
+    y = LOFO
+  )
+) +
+  geom_col() +
   coord_flip() +
-  labs(title = "Importance des variables - XGBoost",
-       x = NULL, y = "Gain") +
+  labs(
+    title = "LOFO - Leave One Feature Out",
+    x = NULL,
+    y = "Augmentation du log-loss"
+  ) +
   theme_minimal()
 ```
 
-## Valeurs de Shapley 
+A nouveau, perdre B08A et B baisserait le plus la performance de notre modèle. Nous ne sommes pas très surpris de l'importance répétée de ces variables puisque la consommation d'alcool est un phénomène connu de mimétisme social.
 
-Ici, pour chaque variable et chacune de leurs modalités est affiché la moyenne des valeurs de shapley en valeur absolue.
-
-Exemple : Avoir redoublé (Q052) fait varier en moyenne d'environ 25% la probabilité d'être affecté à la modalité 5 (17+).
+# 8. Valeurs de Shapley : explication locale
 
 ```{r}
-shap_multi <- shapviz(final_xgb, X_pred = as.matrix(x_train), X = x_train)
+shapley_predictor <- iml::Predictor$new(
+  model = final_rf,
+  data = X_test_posthoc,
+  y = test_data$Y,
+  predict.function = function(model, newdata) {
+    predict_rf_prob(model, newdata)[, target_class]
+  }
+)
 
-# graphiques pour toutes les classes 
-sv_importance(shap_multi, kind = "bar")
+# Première observation du TEST
+x_interest <- X_test_posthoc[1, , drop = FALSE]
 
+set.seed(123)
+
+shapley_one <- iml::Shapley$new(
+  predictor = shapley_predictor,
+  x.interest = x_interest,
+  sample.size = 100
+)
+
+plot(shapley_one)
 ```
 
-## Accumulated Local Effect 
+En regardant les deux valeurs extrêmes :
 
-```{r}
+-   Ëtre non concerné par la questions sur la consommation d'alcool de la mère contribue plus qu'aucune autre modalité à orienter le modèle vers une prédiction du premier verre d'alcool à 15 ans.
 
-```
+-   Le fait que l'individu répondant soit un homme tire plutôt le modèle vers d'autres classes que 15 ans. Probablement parce que les répondants hommes boivent plus jeunes.
+
 
 ## Résultats finaux à comparer
 
@@ -1538,11 +1856,6 @@ print(cm_stack)
 cat("\n--- Accuracy ---\n")
 print(accuracy_results)
 
-cat("\n--- Importance RF ---\n")
-print(rf_importance)
-
-cat("\n--- Importance XGBoost ---\n")
-print(xgb_importance)
 
 cat("\n--- Matrice pondérée RF ---\n")
 print(weighted_cm_rf)
@@ -1578,3 +1891,5 @@ En ayant discrétisé Y sur les quintiles, on a peut être éclaté des individu
 3\)
 
 il existe un package pour faire des random forest spécialisé pour prédire une variable ordinale: `ordinalForest`
+
+A noter que nous avons tester un modèle en retirant les non-répondants à notre variable Y plutôt qu'en considérant qu'il s'agit de répondants non-concernés et que la performance ne s'est pas améliorée.
